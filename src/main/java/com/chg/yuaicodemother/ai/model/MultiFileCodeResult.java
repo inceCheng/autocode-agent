@@ -9,7 +9,7 @@ import lombok.Data;
  */
 @Data
 @Description("生成多个代码文件的结果")
-public class MultiFileResult {
+public class MultiFileCodeResult {
 
     /**
      * html 代码
