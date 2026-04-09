@@ -3,6 +3,7 @@ package com.chg.yuaicodemother.core.saver;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import com.chg.yuaicodemother.constant.AppConstant;
 import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
@@ -18,7 +19,7 @@ import java.time.LocalDate;
 public abstract class CodeFileSaverTemplate<T> {
 
     // 文件保存根目录
-    protected static final String FILE_SAVE_ROOT_DIR = System.getProperty("user.dir") + "/tmp/code_output";
+    protected static final String FILE_SAVE_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
 
     /**
      * 模板方法：保存代码的标准流程
@@ -26,11 +27,11 @@ public abstract class CodeFileSaverTemplate<T> {
      * @param result 代码结果对象
      * @return 保存的目录
      */
-    public final File saveCode(T result) {
+    public final File saveCode(T result, Long appId) {
         // 1. 验证输入
         validateInput(result);
         // 2. 构建唯一目录
-        String baseDirPath = buildUniqueDir();
+        String baseDirPath = buildUniqueDir(appId);
         // 3. 保存文件（具体实现由子类提供）
         saveFiles(result, baseDirPath);
         // 4. 返回目录文件对象
@@ -38,11 +39,12 @@ public abstract class CodeFileSaverTemplate<T> {
     }
 
     /**
-     * 构建文件的唯一路径  tmp/code_output/year/month/day/bizType_雪花 ID
+     * 构建文件的唯一路径  tmp/code_output/year/month/day/bizType_应用 Id
      *
+     * @param appId 应用 id
      * @return 路径
      */
-    protected final String buildUniqueDir() {
+    protected final String buildUniqueDir(Long appId) {
         // 获取当前日期
         LocalDate now = LocalDate.now();
         String codeType = getCodeType().getValue();
@@ -51,12 +53,8 @@ public abstract class CodeFileSaverTemplate<T> {
                 now.getYear(),
                 now.getMonthValue(),
                 now.getDayOfMonth());
-
-        // 生成雪花 ID
-        String snowflakeId = IdUtil.getSnowflakeNextIdStr();
-
         // 构建完整路径
-        String dirPath = String.format("%s/%s/%s_%s", FILE_SAVE_ROOT_DIR, datePath, codeType, snowflakeId);
+        String dirPath = String.format("%s/%s/%s_%s", FILE_SAVE_ROOT_DIR, datePath, codeType, appId);
         FileUtil.mkdir(dirPath);
         return dirPath;
     }

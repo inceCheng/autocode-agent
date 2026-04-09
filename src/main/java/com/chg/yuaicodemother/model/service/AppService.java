@@ -1,10 +1,12 @@
 package com.chg.yuaicodemother.model.service;
 
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.vo.AppVO;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
 import com.chg.yuaicodemother.model.entity.App;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -14,6 +16,25 @@ import java.util.List;
  * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
  */
 public interface AppService extends IService<App> {
+    /**
+     * 应用聊天生成代码 流式 SSE
+     *
+     * @param appId     应用 id
+     * @param message   提示词
+     * @param loginUser 登录用户
+     * @return 流式响应
+     */
+
+    Flux<String> chatToGenCode(Long appId, String message, User loginUser);
+
+    /**
+     * 应用生成代码部署
+     *
+     * @param appId     应用 id
+     * @param loginUser 登录用户
+     * @return 应用 URL
+     */
+    String deployApp(Long appId, User loginUser);
 
     /**
      * 应用详情
