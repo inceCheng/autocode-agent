@@ -9,11 +9,41 @@ spring:
     password: 123456
   profiles:
     active: local
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  session:
+    store-type: redis
+    timeout: 2592000s
+    redis:
+      namespace: yu-ai-code-mother:session
+      flush-mode: on-save
 
 server:
   port: 8123
   servlet:
     context-path: /api/v1
+    session:
+      cookie:
+        max-age: 2592000s
+        http-only: true
+
+  # LangChain4j Redis 配置（独立配置，避免与 Spring Data Redis 冲突）
+app:
+  langchain4j:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      ttl: 3600
 # springdoc-openapi
 springdoc:
   group-configs:
