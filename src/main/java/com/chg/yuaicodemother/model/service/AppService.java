@@ -1,5 +1,6 @@
 package com.chg.yuaicodemother.model.service;
 
+import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.vo.AppVO;
@@ -16,6 +17,15 @@ import java.util.List;
  * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
  */
 public interface AppService extends IService<App> {
+    /**
+     * 创建应用的方法
+     *
+     * @param appAddRequest 包含应用创建所需信息的请求对象
+     * @param loginUser     当前登录用户信息
+     * @return 创建成功后返回的应用ID(Long类型)
+     */
+    Long createApp(AppAddRequest appAddRequest, User loginUser);
+
     /**
      * 应用聊天生成代码 流式 SSE
      *
@@ -60,4 +70,6 @@ public interface AppService extends IService<App> {
      * @return 脱敏后用户列表
      */
     List<AppVO> getAppVOList(List<App> appList);
+
+    void generateAppScreenshotAsync(Long appId, String appUrl);
 }

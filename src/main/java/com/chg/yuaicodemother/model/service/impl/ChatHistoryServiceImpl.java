@@ -116,7 +116,6 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
 
-
     /**
      * 获取查询包装类
      *
