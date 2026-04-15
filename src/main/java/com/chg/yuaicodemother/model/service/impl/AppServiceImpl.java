@@ -83,6 +83,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 使用 AI 智能选择代码生成类型
         CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
         app.setCodeGenType(selectedCodeGenType.getValue());
+        // 设置预览路径
+        LocalDate now = LocalDate.now();
+        String datePath = String.format("%d/%02d/%02d",
+                now.getYear(),
+                now.getMonthValue(),
+                now.getDayOfMonth());
+        app.setPreviewPath(datePath);
         // 插入数据库
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
@@ -98,7 +105,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "用户消息不能为空");
         // 2. 查询应用信息
         App app = this.getById(appId);
-        app.setCodeGenType(CodeGenTypeEnum.VUE_PROJECT.getValue());
+        app.setCodeGenType(app.getCodeGenType());
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         // 3. 验证用户是否有权限访问该应用，仅本人可以生成代码
         if (!app.getUserId().equals(loginUser.getId())) {
@@ -115,7 +122,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 6. 调用 AI 生成代码
         Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
         // 7. 收集 ai 响应内容并在完成后记录到对话历史聊天记录
-        return streamHandlerExecutor.doExecute(contentFlux, chatHistoryService, appId, loginUser, codeGenTypeEnum);
+        return streamHandlerExecutor.doExecute(contentFlux, chatHistoryService, appId, app.getPreviewPath(), loginUser, codeGenTypeEnum);
     }
 
 
@@ -139,15 +146,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         // 5. 获取代码生成类型，构建源目录路径
         String codeGenType = app.getCodeGenType();
-
-        LocalDate now = LocalDate.now();
-        // 格式化日期为 year/month/day
-        String datePath = String.format("%d/%02d/%02d",
-                now.getYear(),
-                now.getMonthValue(),
-                now.getDayOfMonth());
-        // 构建完整路径
-        String sourceDirPath = String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, datePath, codeGenType, appId);
+        String sourceDirPath = String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, app.getPreviewPath(), codeGenType, appId);
         // 6. 检查源目录是否存在
         File sourceDir = new File(sourceDirPath);
         if (!sourceDir.exists() || !sourceDir.isDirectory()) {
@@ -166,7 +165,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             log.info("项目构建成功，dist 目录路径：{}", distDir.getAbsolutePath());
 
         }
-        String deployDirPath = String.format("%s/%s/%s", AppConstant.CODE_DEPLOY_ROOT_DIR, datePath, deployKey);
+        String deployDirPath = String.format("%s/%s/%s", AppConstant.CODE_DEPLOY_ROOT_DIR, app.getPreviewPath(), deployKey);
         try {
             FileUtil.copyContent(sourceDir, new File(deployDirPath), true);
         } catch (Exception e) {
@@ -180,7 +179,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
         // 9.构建应用访问 url
-        String url = String.format("%s/%s/%s/", AppConstant.CODE_DEPLOY_HOST, datePath, deployKey);
+        String url = String.format("%s/%s/%s/", AppConstant.CODE_DEPLOY_HOST, app.getPreviewPath(), deployKey);
         // 10.异步生成截图并更新应用封面
         generateAppScreenshotAsync(appId, url);
         // 11. 返回可访问的 url

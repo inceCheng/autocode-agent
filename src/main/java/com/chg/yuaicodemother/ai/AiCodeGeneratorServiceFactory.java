@@ -1,6 +1,6 @@
 package com.chg.yuaicodemother.ai;
 
-import com.chg.yuaicodemother.ai.tools.FileWriteTool;
+import com.chg.yuaicodemother.ai.tools.*;
 import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
@@ -42,6 +42,9 @@ public class AiCodeGeneratorServiceFactory {
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private ToolManager toolManager;
 
 
     /**
@@ -99,22 +102,22 @@ public class AiCodeGeneratorServiceFactory {
      * @return 配置好的 AI 服务实例
      */
     private AiCodeGeneratorService createAiCodeGeneratorService(long appId, CodeGenTypeEnum codeGenType) {
-        // 根据 appId 构建独立的对话记忆，设置最大消息数为20
+        // 根据 appId 构建独立的对话记忆，设置最大消息数为100
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory
                 .builder()
                 .id(appId)
                 .chatMemoryStore(redisChatMemoryStore)
                 .maxMessages(100)
                 .build();
-        // 从数据库加载历史对话到记忆中，最多加载20条记录
-        chatHistoryService.loadChatHistoryToMemory(appId, chatMemory, 20);
+        // 从数据库加载历史对话到记忆中，最多加载50条记录
+        chatHistoryService.loadChatHistoryToMemory(appId, chatMemory, 50);
         // 根据代码生成类型选择不同的模型配置
         return switch (codeGenType) {
             // Vue 项目生成使用推理模型，并添加文件写入工具
             case VUE_PROJECT -> AiServices.builder(AiCodeGeneratorService.class)
                     .streamingChatModel(reasoningStreamingChatModel)
                     .chatMemoryProvider(memoryId -> chatMemory)
-                    .tools(new FileWriteTool())
+                    .tools(toolManager.getAllTools())
                     // 当 ai 尝试调用不存在的工具时的处理策略
                     .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
                             // 创建一个工具执行结果消息，告诉 ai 它尝试调用的工具不存在

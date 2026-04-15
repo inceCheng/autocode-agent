@@ -83,6 +83,9 @@ public class App implements Serializable {
     @Column("userId")
     private Long userId;
 
+    @Column("previewPath")
+    private String previewPath;
+
     /**
      * 编辑时间
      */

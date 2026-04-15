@@ -25,7 +25,7 @@ public class SimpleTextStreamHandler {
      */
     public Flux<String> handle(Flux<String> originFlux,
                                ChatHistoryService chatHistoryService,
-                               long appId, User loginUser) {
+                               long appId, String previewPath, User loginUser) {
         StringBuilder aiResponseBuilder = new StringBuilder();
         return originFlux
                 .map(chunk -> {

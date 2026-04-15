@@ -42,6 +42,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Lazy
     private AppService appService;
 
+    // 消息最大长度限制（longtext 最大支持 4GB，这里限制为 50MB 防止内存问题）
+    private static final int MAX_MESSAGE_LENGTH = 50 * 1024 * 1024;
+
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
@@ -51,7 +54,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 验证消息类型是否有效
         ChatHistoryMessageTypeEnum messageTypeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(messageType);
         ThrowUtils.throwIf(messageTypeEnum == null, ErrorCode.PARAMS_ERROR, "不支持的消息类型: " + messageType);
-        ChatHistory chatHistory = ChatHistory.builder().appId(appId).message(message).messageType(messageType).userId(userId).build();
+        // 截断过长的消息
+        String truncatedMessage = message;
+        if (message.length() > MAX_MESSAGE_LENGTH) {
+            log.warn("消息长度超过限制，进行截断，原长度: {}, 最大允许: {}", message.length(), MAX_MESSAGE_LENGTH);
+            truncatedMessage = message.substring(0, MAX_MESSAGE_LENGTH) + "\n\n[消息过长，已截断]";
+        }
+        ChatHistory chatHistory = ChatHistory.builder().appId(appId).message(truncatedMessage).messageType(messageType).userId(userId).build();
         return this.save(chatHistory);
     }
 

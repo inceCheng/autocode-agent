@@ -47,7 +47,7 @@ create table app
 create table chat_history
 (
     id          bigint auto_increment comment 'id' primary key,
-    message     text                               not null comment '消息',
+    message     longtext                           not null comment '消息',
     messageType varchar(32)                        not null comment 'user/ai',
     appId       bigint                             not null comment '应用id',
     userId      bigint                             not null comment '创建用户id',
@@ -58,3 +58,11 @@ create table chat_history
     INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+
+
+-- 切换到对应的数据库
+USE yu_ai_code_mother;
+
+-- 为 app 表增加 previewPath 列
+ALTER TABLE app
+    ADD COLUMN previewPath varchar(512) NULL COMMENT '预览路径' AFTER deployKey;
