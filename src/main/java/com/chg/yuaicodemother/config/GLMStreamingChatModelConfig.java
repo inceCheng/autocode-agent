@@ -6,11 +6,12 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
 
 @Configuration
-@ConfigurationProperties(prefix = "langchain4j.open-ai.chat-model")
+@ConfigurationProperties(prefix = "ai.glm")
 @Data
-public class ReasoningStreamingChatModelConfig {
+public class GLMStreamingChatModelConfig {
 
     private String baseUrl;
 
@@ -18,20 +19,25 @@ public class ReasoningStreamingChatModelConfig {
 
     private String modelName;
 
-    private Integer maxTokens = 8192;
+    private Integer maxTokens;
 
-    /**
-     * 推理流式模型（用于 Vue 项目生成，带工具调用）
-     */
+    private Double temperature;
+
+    private boolean logRequests;
+
+    private boolean logResponses;
+
     @Bean
-    public StreamingChatModel reasoningStreamingChatModel() {
+    @Scope("prototype")
+    public StreamingChatModel glmStreamingChatModel() {
         return OpenAiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .modelName(modelName)
                 .maxTokens(maxTokens)
-                .logRequests(true)
-                .logResponses(true)
+                .temperature(temperature)
+                .logRequests(logRequests)
+                .logResponses(logResponses)
                 .build();
     }
 }

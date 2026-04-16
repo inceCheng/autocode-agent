@@ -1,5 +1,7 @@
 package com.chg.yuaicodemother.langgraph4j.service;
 
+import com.chg.yuaicodemother.constant.ChatModelNameConstant;
+import com.chg.yuaicodemother.utools.SpringContextUtil;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import jakarta.annotation.Resource;
@@ -12,11 +14,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class ImageCollectionPlanServiceFactory {
 
-    @Resource
-    private ChatModel chatModel;
-
     @Bean
     public ImageCollectionPlanService createImageCollectionPlanService() {
+        ChatModel chatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiChatModel, ChatModel.class);
         return AiServices.builder(ImageCollectionPlanService.class)
                 .chatModel(chatModel)
                 .build();

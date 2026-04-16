@@ -1,10 +1,12 @@
 package com.chg.yuaicodemother.ai;
 
 import com.chg.yuaicodemother.ai.tools.*;
+import com.chg.yuaicodemother.constant.ChatModelNameConstant;
 import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
+import com.chg.yuaicodemother.utools.SpringContextUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
@@ -18,7 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.io.File;
 import java.time.Duration;
 
 /**
@@ -27,15 +28,6 @@ import java.time.Duration;
 @Slf4j
 @Configuration
 public class AiCodeGeneratorServiceFactory {
-
-    @Resource
-    private ChatModel chatModel;
-
-    @Resource
-    private StreamingChatModel openAiStreamingChatModel;
-
-    @Resource
-    private StreamingChatModel reasoningStreamingChatModel;
 
     @Resource
     private RedisChatMemoryStore redisChatMemoryStore;
@@ -86,9 +78,11 @@ public class AiCodeGeneratorServiceFactory {
                 .build();
         // 从数据库加载历史对话到记忆中
         chatHistoryService.loadChatHistoryToMemory(appId, chatMemory, 20);
+        StreamingChatModel kimiStreamChatModel = SpringContextUtil.getBean(ChatModelNameConstant.deepseekChatModel, StreamingChatModel.class);
+        ChatModel kimiChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiChatModel, ChatModel.class);
         return AiServices.builder(AiCodeGeneratorService.class)
-                .chatModel(chatModel)
-                .streamingChatModel(openAiStreamingChatModel)
+                .chatModel(kimiChatModel)
+                .streamingChatModel(kimiStreamChatModel)
                 .chatMemory(chatMemory)
                 .build();
     }
@@ -114,22 +108,30 @@ public class AiCodeGeneratorServiceFactory {
         // 根据代码生成类型选择不同的模型配置
         return switch (codeGenType) {
             // Vue 项目生成使用推理模型，并添加文件写入工具
-            case VUE_PROJECT -> AiServices.builder(AiCodeGeneratorService.class)
-                    .streamingChatModel(reasoningStreamingChatModel)
-                    .chatMemoryProvider(memoryId -> chatMemory)
-                    .tools(toolManager.getAllTools())
-                    // 当 ai 尝试调用不存在的工具时的处理策略
-                    .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
-                            // 创建一个工具执行结果消息，告诉 ai 它尝试调用的工具不存在
-                            toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
-                    ))
-                    .build();
+            case VUE_PROJECT -> {
+                StreamingChatModel kimiStreamChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiStreamingChatModel, StreamingChatModel.class);
+                yield AiServices.builder(AiCodeGeneratorService.class)
+                        .streamingChatModel(kimiStreamChatModel)
+                        .chatMemoryProvider(memoryId -> chatMemory)
+                        .tools(toolManager.getAllTools())
+                        // 当 ai 尝试调用不存在的工具时的处理策略
+                        .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
+                                // 创建一个工具执行结果消息，告诉 ai 它尝试调用的工具不存在
+                                toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
+                        ))
+                        .build();
+            }
             // HTML 和多文件生成使用默认模型
-            case HTML, MULTI_FILE -> AiServices.builder(AiCodeGeneratorService.class)
-                    .chatModel(chatModel)
-                    .streamingChatModel(openAiStreamingChatModel)
-                    .chatMemory(chatMemory)
-                    .build();
+            case HTML, MULTI_FILE -> {
+                // 使用多例模式的 StreamingChatModel 解决并发问题
+                StreamingChatModel kimiStreamChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiStreamingChatModel, StreamingChatModel.class);
+                ChatModel kimiChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiChatModel, ChatModel.class);
+                yield AiServices.builder(AiCodeGeneratorService.class)
+                        .chatModel(kimiChatModel)
+                        .streamingChatModel(kimiStreamChatModel)
+                        .chatMemory(chatMemory)
+                        .build();
+            }
             // 不支持的代码生成类型抛出异常
             default -> throw new BusinessException(ErrorCode.SYSTEM_ERROR,
                     "不支持的代码生成类型: " + codeGenType.getValue());

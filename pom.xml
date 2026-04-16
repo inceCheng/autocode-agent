@@ -72,11 +72,17 @@
             <version>2.21.1</version>
         </dependency>
         <!-- 智谱 SDK-->
-        <dependency>
-            <groupId>ai.z.openapi</groupId>
-            <artifactId>zai-sdk</artifactId>
-            <version>0.3.3</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>ai.z.openapi</groupId>-->
+<!--            <artifactId>zai-sdk</artifactId>-->
+<!--            <version>0.3.3</version>-->
+<!--            <exclusions>-->
+<!--                <exclusion>-->
+<!--                    <groupId>dev.langchain4j</groupId>-->
+<!--                    <artifactId>langchain4j-http-client-jdk</artifactId>-->
+<!--                </exclusion>-->
+<!--            </exclusions>-->
+<!--        </dependency>-->
 
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>

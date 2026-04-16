@@ -2,7 +2,8 @@ package com.chg.yuaicodemother.config;
 
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,21 +14,18 @@ import java.time.Duration;
  * 配置非流式聊天模型，用于图片收集等工具调用场景
  */
 @Configuration
-public class ChatModelConfig {
+@ConfigurationProperties(prefix = "ai.deepseek")
+@Data
+public class DeepSeekChatModelConfig {
 
-    @Value("${langchain4j.open-ai.chat-model.base-url}")
     private String baseUrl;
 
-    @Value("${langchain4j.open-ai.chat-model.api-key}")
     private String apiKey;
 
-    @Value("${langchain4j.open-ai.chat-model.model-name}")
     private String modelName;
 
-    @Value("${langchain4j.open-ai.chat-model.max-tokens:8192}")
     private Integer maxTokens;
 
-    @Value("${langchain4j.open-ai.chat-model.max-retries:3}")
     private Integer maxRetries;
 
     /**
@@ -35,7 +33,7 @@ public class ChatModelConfig {
      * 设置较长的超时时间以应对 DeepSeek API 响应较慢的情况
      */
     @Bean
-    public ChatModel chatModel() {
+    public ChatModel deepseekChatModel() {
         return OpenAiChatModel.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
