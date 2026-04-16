@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 
 @Configuration
-@ConfigurationProperties(prefix = "ai.minimax")
+@ConfigurationProperties(prefix = "ai.kimi")
 @Data
 public class KiMiStreamingChatModelConfig {
 
