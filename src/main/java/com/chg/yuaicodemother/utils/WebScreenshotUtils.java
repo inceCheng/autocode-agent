@@ -1,4 +1,4 @@
-package com.chg.yuaicodemother.utools;
+package com.chg.yuaicodemother.utils;
 
 import cn.hutool.core.img.ImgUtil;
 import cn.hutool.core.io.FileUtil;

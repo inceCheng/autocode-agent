@@ -5,7 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.exception.ThrowUtils;
 import com.chg.yuaicodemother.manager.CosManager;
-import com.chg.yuaicodemother.utools.WebScreenshotUtils;
+import com.chg.yuaicodemother.utils.WebScreenshotUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

@@ -6,7 +6,7 @@ import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
-import com.chg.yuaicodemother.utools.SpringContextUtil;
+import com.chg.yuaicodemother.utils.SpringContextUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
@@ -110,10 +110,14 @@ public class AiCodeGeneratorServiceFactory {
             // Vue 项目生成使用推理模型，并添加文件写入工具
             case VUE_PROJECT -> {
                 StreamingChatModel kimiStreamChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiStreamingChatModel, StreamingChatModel.class);
+                // OutputGuardrailsConfig outputGuardrailsConfig = OutputGuardrailsConfig.builder().maxRetries(3).build();
                 yield AiServices.builder(AiCodeGeneratorService.class)
                         .streamingChatModel(kimiStreamChatModel)
                         .chatMemoryProvider(memoryId -> chatMemory)
                         .tools(toolManager.getAllTools())
+                        .maxSequentialToolsInvocations(25) // 最多连续调用 25 次工具
+                        // .outputGuardrails(new RetryOutputGuardrail())
+                        // .outputGuardrailsConfig(outputGuardrailsConfig)
                         // 当 ai 尝试调用不存在的工具时的处理策略
                         .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
                                 // 创建一个工具执行结果消息，告诉 ai 它尝试调用的工具不存在
@@ -126,10 +130,15 @@ public class AiCodeGeneratorServiceFactory {
                 // 使用多例模式的 StreamingChatModel 解决并发问题
                 StreamingChatModel kimiStreamChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiStreamingChatModel, StreamingChatModel.class);
                 ChatModel kimiChatModel = SpringContextUtil.getBean(ChatModelNameConstant.kimiChatModel, ChatModel.class);
+                // OutputGuardrailsConfig outputGuardrailsConfig = OutputGuardrailsConfig.builder().maxRetries(3).build();
                 yield AiServices.builder(AiCodeGeneratorService.class)
                         .chatModel(kimiChatModel)
                         .streamingChatModel(kimiStreamChatModel)
                         .chatMemory(chatMemory)
+                        .tools(toolManager.getAllTools())
+                        .maxSequentialToolsInvocations(15) // 最多连续调用 15 次工具
+                        // .outputGuardrails(new RetryOutputGuardrail())
+                        // .outputGuardrailsConfig(outputGuardrailsConfig)
                         .build();
             }
             // 不支持的代码生成类型抛出异常

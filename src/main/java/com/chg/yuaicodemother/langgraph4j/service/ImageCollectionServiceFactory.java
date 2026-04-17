@@ -5,7 +5,7 @@ import com.chg.yuaicodemother.langgraph4j.tools.ImageSearchTool;
 import com.chg.yuaicodemother.langgraph4j.tools.LogoGeneratorTool;
 import com.chg.yuaicodemother.langgraph4j.tools.MermaidDiagramTool;
 import com.chg.yuaicodemother.langgraph4j.tools.UndrawIllustrationTool;
-import com.chg.yuaicodemother.utools.SpringContextUtil;
+import com.chg.yuaicodemother.utils.SpringContextUtil;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import jakarta.annotation.Resource;

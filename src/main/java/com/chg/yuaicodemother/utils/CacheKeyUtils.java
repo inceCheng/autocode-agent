@@ -1,4 +1,4 @@
-package com.chg.yuaicodemother.utools;
+package com.chg.yuaicodemother.utils;
 
 import cn.hutool.crypto.digest.DigestUtil;
 import cn.hutool.json.JSONUtil;

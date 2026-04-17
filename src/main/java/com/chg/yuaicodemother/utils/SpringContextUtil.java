@@ -1,4 +1,4 @@
-package com.chg.yuaicodemother.utools;
+package com.chg.yuaicodemother.utils;
 
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;

@@ -9,5 +9,6 @@ public interface ChatModelNameConstant {
     String deepseekChatModel = "deepseekChatModel";
     String kimiStreamingChatModel = "kimiStreamingChatModel";
     String glmStreamingChatModel = "glmStreamingChatModel";
+    String qwenChatModel = "qwenChatModel";
 
 }

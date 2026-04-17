@@ -3,7 +3,7 @@ package com.chg.yuaicodemother.langgraph4j.node.concurrent;
 import com.chg.yuaicodemother.langgraph4j.model.ImageCollectionPlan;
 import com.chg.yuaicodemother.langgraph4j.service.ImageCollectionPlanService;
 import com.chg.yuaicodemother.langgraph4j.state.WorkflowContext;
-import com.chg.yuaicodemother.utools.SpringContextUtil;
+import com.chg.yuaicodemother.utils.SpringContextUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
 import org.bsc.langgraph4j.prebuilt.MessagesState;

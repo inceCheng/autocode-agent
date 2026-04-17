@@ -217,7 +217,7 @@ public class AppController {
     @PostMapping("/good/list/page/vo")
     @Cacheable(
             value = "good_app_page",
-            key = "T(com.chg.yuaicodemother.utools.CacheKeyUtils).generateKey('good_app_page_query',#appQueryRequest)",
+            key = "T(com.chg.yuaicodemother.utils.CacheKeyUtils).generateKey('good_app_page_query',#appQueryRequest)",
             condition = "#appQueryRequest.pageNum<=10"
     )
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {

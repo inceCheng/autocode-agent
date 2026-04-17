@@ -1,0 +1,50 @@
+package com.chg.yuaicodemother.config;
+
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
+
+import java.time.Duration;
+
+/**
+ * ChatModel 配置
+ * 配置非流式聊天模型，用于图片收集等工具调用场景
+ */
+@Configuration
+@ConfigurationProperties(prefix = "ai.qwen")
+@Data
+public class QwenChatModelConfig {
+
+    private String baseUrl;
+
+    private String apiKey;
+
+    private String modelName;
+
+    private Integer maxTokens;
+
+    private Integer maxRetries;
+
+    /**
+     * 非流式 ChatModel 用于智能路由
+     *
+     */
+    @Bean
+    @Scope("prototype")
+    public ChatModel qwenChatModel() {
+        return OpenAiChatModel.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .modelName(modelName)
+                .maxTokens(maxTokens)
+                .timeout(Duration.ofSeconds(120))  // 设置 120 秒超时
+                .maxRetries(maxRetries)
+                .logRequests(true)
+                .logResponses(true)
+                .build();
+    }
+}
