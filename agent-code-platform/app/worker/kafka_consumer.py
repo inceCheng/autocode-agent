@@ -138,8 +138,11 @@ async def _handle_vue_project(
 
         elif event.type == AgentEventType.TOOL_END:
             tool_info = {"type": "tool_result", "action": event.tool_name}
-            if event.tool_input and event.tool_input.get("path"):
-                tool_info["path"] = event.tool_input["path"]
+            if event.tool_input:
+                if event.tool_input.get("path"):
+                    tool_info["path"] = event.tool_input["path"]
+                if "content" in event.tool_input and event.tool_input["content"] is not None:
+                    tool_info["content"] = event.tool_input["content"]
             chunk = ChatCompletionChunk.new_content(
                 seq=seq,
                 content=json.dumps(tool_info, ensure_ascii=False),
