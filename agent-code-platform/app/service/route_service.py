@@ -26,10 +26,10 @@ class RouteService:
     def __init__(self) -> None:
         settings = get_settings()
         llm = ChatOpenAI(
-            api_key=settings.dashscope_api_key.get_secret_value(),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            model="qwen3.5-flash",
-            temperature=0,
+            api_key=settings.route_api_key.get_secret_value() if settings.route_api_key else None,
+            base_url=settings.route_codegen_base_url if settings.route_codegen_base_url else "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model=settings.route_codegen_model_name if settings.route_codegen_model_name else "qwen3.5-flash",
+            temperature=settings.route_codegen_temperature if settings.route_codegen_temperature else 0.3,
             max_tokens=50,
             extra_body={"enable_thinking": False},
         )
@@ -44,7 +44,14 @@ class RouteService:
             HumanMessage(content=prompt),
         ]
         try:
-            return await self._structured_llm.ainvoke(messages)
+            result = await self._structured_llm.ainvoke(messages)
+            if result is None:
+                logger.warning("智能路由解析结果为None，回退返回 HTML 类型")
+                return RouteResponse(
+                    project_type=ProjectType.HTML,
+                    reasoning="模型输出解析失败，默认回退",
+                )
+            return result
         except Exception:
             logger.exception("智能路由调用大模型失败，回退返回 HTML 类型")
             return RouteResponse(

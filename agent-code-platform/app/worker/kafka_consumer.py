@@ -1,15 +1,24 @@
 import asyncio
+import json
 import logging
 import uuid
+from pathlib import Path
 
 from app.common.enums.project_type import ProjectType
 from app.config.kafka import get_kafka_consumer
-from app.dependency.container import get_html_gen_service, get_multi_file_gen_service, get_stream_service
+from app.config.settings import get_settings
+from app.dependency.container import (
+    get_html_gen_service,
+    get_multi_file_gen_service,
+    get_stream_service,
+    get_vue_project_gen_service,
+)
 from app.model.event.ai_task_event import AiTaskEvent
 from app.model.response.stream_response import ChatCompletionChunk, CompletionMetadata
 from app.service.html_service import HtmlGenService
 from app.service.multi_file_service import MultiFileGenService
 from app.service.stream_service import StreamService
+from app.service.vue_project_service import AgentEventType, VueProjectGenService
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +100,69 @@ async def _handle_multi_file(
     )
 
 
+async def _handle_vue_project(
+    task_id: str,
+    prompt: str,
+    completion_id: str,
+    stream_service: StreamService,
+    vue_project_service: VueProjectGenService,
+) -> None:
+    """处理 VUE_PROJECT 工程项目生成任务：通过 Agent + Tool Calling 流式生成"""
+    seq = 0
+    settings = get_settings()
+
+    # 创建项目目录
+    dir_name = VueProjectGenService.generate_dir_name()
+    project_dir = Path(settings.vue_project_output_dir) / dir_name
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    async for event in vue_project_service.generate_stream(prompt, project_dir):
+        if event.type == AgentEventType.TEXT:
+            chunk = ChatCompletionChunk.new_content(
+                seq=seq, content=event.content, completion_id=completion_id,
+            )
+            await stream_service.push_chunk(task_id, chunk)
+            seq += 1
+
+        elif event.type == AgentEventType.TOOL_START:
+            tool_info = {"type": "tool_call", "action": event.tool_name}
+            if event.tool_input and event.tool_input.get("path"):
+                tool_info["path"] = event.tool_input["path"]
+            chunk = ChatCompletionChunk.new_content(
+                seq=seq,
+                content=json.dumps(tool_info, ensure_ascii=False),
+                completion_id=completion_id,
+            )
+            await stream_service.push_chunk(task_id, chunk)
+            seq += 1
+
+        elif event.type == AgentEventType.TOOL_END:
+            tool_info = {"type": "tool_result", "action": event.tool_name}
+            if event.tool_input and event.tool_input.get("path"):
+                tool_info["path"] = event.tool_input["path"]
+            chunk = ChatCompletionChunk.new_content(
+                seq=seq,
+                content=json.dumps(tool_info, ensure_ascii=False),
+                completion_id=completion_id,
+            )
+            await stream_service.push_chunk(task_id, chunk)
+            seq += 1
+
+    # 后处理：扫描项目目录，收集所有文件元信息
+    file_metas = VueProjectGenService.scan_project_files(dir_name, project_dir)
+    metadata = CompletionMetadata(
+        files=[f.model_dump() for f in file_metas],
+    )
+    done_chunk = ChatCompletionChunk.new_done(
+        seq=seq, metadata=metadata.model_dump(exclude_none=True), completion_id=completion_id,
+    )
+    await stream_service.push_done(task_id, done_chunk)
+    logger.info(
+        "VUE_PROJECT任务处理完成: task_id=%s, dir=%s, files=%d",
+        task_id, dir_name, len(file_metas),
+    )
+
+
 async def kafka_consumer_worker() -> None:
     """
     Kafka消费者后台工作线程。
@@ -98,6 +170,7 @@ async def kafka_consumer_worker() -> None:
     监听 agent-generation-tasks Topic，根据 projectType 分发到不同的生成服务：
     - HTML: 单文件生成
     - MULTI_FILE: 多文件（html/css/js）生成
+    - VUE_PROJECT: Vue3工程项目生成（Agent + Tool Calling）
 
     每个 Chunk 以 OpenAI chat.completion.chunk 格式通过 Redis 持久化 + 广播。
     """
@@ -105,6 +178,7 @@ async def kafka_consumer_worker() -> None:
     stream_service: StreamService = get_stream_service()
     html_service: HtmlGenService = get_html_gen_service()
     multi_file_service: MultiFileGenService = get_multi_file_gen_service()
+    vue_project_service: VueProjectGenService = get_vue_project_gen_service()
 
     try:
         async for message in consumer:
@@ -121,19 +195,18 @@ async def kafka_consumer_worker() -> None:
                 )
 
                 completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-                logger.debug("生成的 projectType: %s", project_type)
-                logger.debug("生成的 projectType: %s", project_type)
-                logger.debug("生成的 projectType: %s", project_type)
 
                 # 按 projectType 分发
-                if project_type.lower() == ProjectType.MULTI_FILE.value.lower():
-                    logger.debug("生成的 projectType: %s", project_type)
+                pt_lower = project_type.lower()
+                if pt_lower == ProjectType.MULTI_FILE.value.lower():
                     await _handle_multi_file(
                         task_id, prompt, completion_id, stream_service, multi_file_service,
                     )
+                elif pt_lower == ProjectType.VUE_PROJECT.value.lower():
+                    await _handle_vue_project(
+                        task_id, prompt, completion_id, stream_service, vue_project_service,
+                    )
                 else:
-                    logger.debug("生成的 projectType: HTML")
-                    # 默认走 HTML 单文件
                     await _handle_html(
                         task_id, prompt, completion_id, stream_service, html_service,
                     )

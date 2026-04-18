@@ -9,15 +9,19 @@ class Settings(BaseSettings):
     # ==================== 应用基础配置 ====================
     app_name: str = "ai-agent-assistant-platform"
     app_debug: bool = False
-    dashscope_api_key: SecretStr
+    route_api_key: SecretStr
+    route_codegen_base_url: str = "https://api.minimaxi.com/v1"
+    route_codegen_model_name: str = "MiniMax-M2.7"
+    route_codegen_temperature: float = 0.3
+
 
     # ==================== HTML代码生成模型配置 ====================
     # 大模型API密钥（支持OpenAI兼容接口）
     html_codegen_api_key: SecretStr
     # 大模型API基础URL（如DashScope兼容模式地址）
-    html_codegen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    html_codegen_base_url: str = "https://api.minimaxi.com/v1"
     # 大模型名称（如 qwen3.5-flash, qwen-plus 等）
-    html_codegen_model_name: str = "qwen3.5-flash"
+    html_codegen_model_name: str = "MiniMax-M2.7"
     # 生成温度参数，控制创造性（0.0=确定性，1.0=高随机性）
     html_codegen_temperature: float = 0.7
 
@@ -31,9 +35,9 @@ class Settings(BaseSettings):
     # 大模型API密钥（默认复用HTML生成密钥）
     multi_file_codegen_api_key: SecretStr | None = None
     # 大模型API基础URL
-    multi_file_codegen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    multi_file_codegen_base_url: str = "https://api.minimaxi.com/v1"
     # 大模型名称
-    multi_file_codegen_model_name: str = "qwen3.5-flash"
+    multi_file_codegen_model_name: str = "MiniMax-M2.7"
     # 生成温度参数
     multi_file_codegen_temperature: float = 0.7
 
@@ -42,6 +46,24 @@ class Settings(BaseSettings):
     multi_file_output_dir: str = "./output/multi_file"
     # 系统提示词文件路径
     multi_file_system_prompt_path: str = "app/prompts/codegen-multi-file-system-prompt.txt"
+
+    # ==================== Vue工程项目生成模型配置 ====================
+    # 大模型API密钥（默认复用HTML生成密钥）
+    vue_project_codegen_api_key: SecretStr | None = None
+    # 大模型API基础URL
+    vue_project_codegen_base_url: str = "https://api.minimaxi.com/v1"
+    # 大模型名称（需支持Tool Calling）
+    vue_project_codegen_model_name: str = "MiniMax-M2.7"
+    # 生成温度参数
+    vue_project_codegen_temperature: float = 0.7
+
+    # ==================== Vue工程项目生成输出配置 ====================
+    # 生成的Vue工程项目保存目录
+    vue_project_output_dir: str = "./output/vue_project"
+    # 系统提示词文件路径
+    vue_project_system_prompt_path: str = "app/prompts/codegen-vue-project-system-prompt.txt"
+    # 静态文件URL前缀（与main.py中挂载路径保持一致）
+    vue_project_base_url_prefix: str = "/static/vue_project"
 
     # ==================== Kafka 配置 ====================
     kafka_bootstrap_servers: str = "localhost:9092"

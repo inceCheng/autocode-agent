@@ -6,6 +6,7 @@ from app.service.jwt_service import JwtService
 from app.service.multi_file_service import MultiFileGenService
 from app.service.route_service import RouteService
 from app.service.stream_service import StreamService
+from app.service.vue_project_service import VueProjectGenService
 
 
 @lru_cache(maxsize=1)
@@ -37,3 +38,9 @@ def get_jwt_service() -> JwtService:
 def get_stream_service() -> StreamService:
     """依赖注入：获取流式分发服务单例"""
     return StreamService()
+
+
+@lru_cache(maxsize=1)
+def get_vue_project_gen_service() -> VueProjectGenService:
+    """依赖注入：获取Vue工程项目生成服务单例"""
+    return VueProjectGenService()

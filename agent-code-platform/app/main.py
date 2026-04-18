@@ -88,6 +88,11 @@ def create_app() -> FastAPI:
     multi_file_output_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static/multi_file", StaticFiles(directory=str(multi_file_output_dir)), name="multi-file-static")
 
+    # 将Vue工程项目输出目录挂载为静态资源目录
+    vue_project_output_dir = Path(settings.vue_project_output_dir)
+    vue_project_output_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/vue_project", StaticFiles(directory=str(vue_project_output_dir)), name="vue-project-static")
+
     return app
 
 
