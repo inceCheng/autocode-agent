@@ -27,6 +27,21 @@ spring:
     redis:
       namespace: yu-ai-code-mother:session
       flush-mode: on-save
+  kafka:
+    bootstrap-servers: 127.0.0.1:9092 # 替换为你的 Kafka 4.1 集群地址
+    producer:
+      # 重试次数，防止网络抖动导致消息丢失
+      retries: 3
+      # 消息确认机制：all (或 -1) 代表必须等待所有 ISR 副本确认，保证最高的数据安全性
+      acks: all
+      # 批量发送配置，提升吞吐量
+      batch-size: 16384
+      # 延迟发送时间（毫秒），允许在小时间窗口内收集更多消息一起发送
+      properties:
+        linger.ms: 5
+      # 序列化器配置：Key 使用 String，Value 使用 Spring 提供的 JSON 序列化器
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 server:
   port: 8123

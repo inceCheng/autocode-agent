@@ -14,7 +14,9 @@ import com.chg.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.exception.ThrowUtils;
+import com.chg.yuaicodemother.kafka.AiTaskProducer;
 import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
+import com.chg.yuaicodemother.model.dto.app.AppAddResponse;
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
@@ -22,12 +24,16 @@ import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
 import com.chg.yuaicodemother.model.vo.AppVO;
 import com.chg.yuaicodemother.model.vo.UserVO;
+import com.chg.yuaicodemother.utils.JwtUtils;
+import com.chg.yuaicodemother.utils.TaskIdGenerator;
+import com.chg.yuaicodemother.utils.TraceIdGenerator;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.chg.yuaicodemother.model.entity.App;
 import com.chg.yuaicodemother.mapper.AppMapper;
 import com.chg.yuaicodemother.model.service.AppService;
 import jakarta.annotation.Resource;
+import jakarta.websocket.OnClose;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -36,10 +42,7 @@ import java.io.File;
 import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -72,8 +75,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
+    @Resource
+    private JwtUtils jwtUtils;
+
+    @Resource
+    private AiTaskProducer aiTaskProducer;
+
     @Override
-    public Long createApp(AppAddRequest appAddRequest, User loginUser) {
+    public AppAddResponse createApp(AppAddRequest appAddRequest, User loginUser) {
         // 参数校验
         String initPrompt = appAddRequest.getInitPrompt();
         ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化 prompt 不能为空");
@@ -95,9 +104,19 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setPreviewPath(datePath);
         // 插入数据库
         boolean result = this.save(app);
+        // 返回 jwt，并生成 task id ，传入 Kafka 消息队列
+        // TODO: 生成 jwt
+        HashMap<String, Object> claims = new HashMap<>();
+        claims.put("prompt", initPrompt);
+        String token = jwtUtils.generateToken(String.valueOf(loginUser.getId()), claims);
+        // TODO: 生成 task id
+        long taskId = new TaskIdGenerator(1).nextId();
+        String traceId = TraceIdGenerator.generateTraceId();
+        // TODO: 发送 Kafka 消息
+        aiTaskProducer.sendGenerationTask(String.valueOf(taskId), String.valueOf(loginUser.getId()), initPrompt, projectType.getValue(), traceId);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         log.info("应用创建成功，ID: {}, 类型: {}", app.getId(), projectType.getValue());
-        return app.getId();
+        return new AppAddResponse(String.valueOf(taskId), token);
     }
 
 

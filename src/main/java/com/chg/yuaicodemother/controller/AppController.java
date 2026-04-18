@@ -103,11 +103,11 @@ public class AppController {
      * @return 应用 id
      */
     @PostMapping("/add")
-    public BaseResponse<Long> addApp(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
+    public BaseResponse<AppAddResponse> addApp(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR);
         User loginUser = userService.getLoginUser(request);
-        Long appId = appService.createApp(appAddRequest, loginUser);
-        return ResultUtils.success(appId);
+        AppAddResponse response = appService.createApp(appAddRequest, loginUser);
+        return ResultUtils.success(response);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.chg.yuaicodemother.model.service;
 
 import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
+import com.chg.yuaicodemother.model.dto.app.AppAddResponse;
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.vo.AppVO;
@@ -24,7 +25,7 @@ public interface AppService extends IService<App> {
      * @param loginUser     当前登录用户信息
      * @return 创建成功后返回的应用ID(Long类型)
      */
-    Long createApp(AppAddRequest appAddRequest, User loginUser);
+    AppAddResponse createApp(AppAddRequest appAddRequest, User loginUser);
 
     /**
      * 应用聊天生成代码 流式 SSE
