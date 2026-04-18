@@ -135,8 +135,8 @@ public class AiCodeGeneratorServiceFactory {
                         .chatModel(kimiChatModel)
                         .streamingChatModel(kimiStreamChatModel)
                         .chatMemory(chatMemory)
-                        .tools(toolManager.getAllTools())
-                        .maxSequentialToolsInvocations(15) // 最多连续调用 15 次工具
+                        // .tools(toolManager.getAllTools())
+                        // .maxSequentialToolsInvocations(15) // 最多连续调用 15 次工具
                         // .outputGuardrails(new RetryOutputGuardrail())
                         // .outputGuardrailsConfig(outputGuardrailsConfig)
                         .build();

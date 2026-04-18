@@ -5,8 +5,8 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
-import com.chg.yuaicodemother.ai.AiCodeGenTypeRoutingService;
 import com.chg.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
+import com.chg.yuaicodemother.ai.client.AiRouteClient;
 import com.chg.yuaicodemother.constant.AppConstant;
 import com.chg.yuaicodemother.core.AiCodeGeneratorFacade;
 import com.chg.yuaicodemother.core.builder.VueProjectBuilder;
@@ -22,13 +22,11 @@ import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
 import com.chg.yuaicodemother.model.vo.AppVO;
 import com.chg.yuaicodemother.model.vo.UserVO;
-import com.chg.yuaicodemother.utils.SpringContextUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.chg.yuaicodemother.model.entity.App;
 import com.chg.yuaicodemother.mapper.AppMapper;
 import com.chg.yuaicodemother.model.service.AppService;
-import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -63,6 +61,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private ChatHistoryService chatHistoryService;
 
     @Resource
+    private AiRouteClient aiRouteClient;
+
+    @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
     @Resource
     private VueProjectBuilder vueProjectBuilder;
@@ -82,10 +83,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setUserId(loginUser.getId());
         // 应用名称暂时为 initPrompt 前 12 位
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
-        // 使用 AI 智能选择代码生成类型(多例模式）
-        AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
-        CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
-        app.setCodeGenType(selectedCodeGenType.getValue());
+        // 使用 AI 智能选择代码生成类型 调用 Python 服务
+        CodeGenTypeEnum projectType = aiRouteClient.getProjectType(initPrompt);
+        app.setCodeGenType(projectType.getValue());
         // 设置预览路径
         LocalDate now = LocalDate.now();
         String datePath = String.format("%d/%02d/%02d",
@@ -96,7 +96,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 插入数据库
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        log.info("应用创建成功，ID: {}, 类型: {}", app.getId(), selectedCodeGenType.getValue());
+        log.info("应用创建成功，ID: {}, 类型: {}", app.getId(), projectType.getValue());
         return app.getId();
     }
 

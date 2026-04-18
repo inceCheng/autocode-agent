@@ -1,4 +1,5 @@
 ### CUSTOM ###
+# 忽略 Spring Boot 本地配置文件
 application-local.yml
 tmp
 
@@ -35,3 +36,4 @@ build/
 
 ### VS Code ###
 .vscode/
+/agent-code-platform/.env

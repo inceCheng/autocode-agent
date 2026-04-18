@@ -1,0 +1,70 @@
+ai:
+  model: kimi
+  route:
+    url: xxx
+  deepseek:
+    api-key: sk-xxx
+    base-url: xxx
+    model-name: deepseek-chat
+    max-retries: 3
+    max-tokens: 8192
+    temperature: 0.7
+    timeout: 3600
+    log-requests: true
+    log-responses: true
+  glm:
+    api-key: xxx
+    base-url: xxx
+    model-name: glm-4.7
+    max-retries: 3
+    max-tokens: 8192
+    temperature: 0.7
+    timeout: 3600
+    log-requests: true
+    log-responses: true
+  minimax:
+    api-key: xxx
+    base-url: xxx
+    model-name: MiniMax-M2.7
+    max-retries: 3
+    max-tokens: 8192
+    temperature: 0.7
+    timeout: 3600
+    log-requests: true
+    log-responses: true
+  qwen:
+    api-key: xxx
+    base-url: xxx
+    model-name: qwen3.5-flash
+    max-retries: 3
+    max-tokens: 100
+    temperature: 0.7
+    timeout: 3600
+    log-requests: true
+    log-responses: true
+  kimi:
+    api-key: xxx
+    base-url: xxx
+    model-name: kimi-k2.5
+    max-retries: 3
+    max-tokens: 8192
+    temperature: 1
+    timeout: 3600
+    log-requests: true
+    log-responses: true
+# 添加 COS 对象存储配置（需要从腾讯云获取）
+cos:
+  client:
+    host: xxx
+    secretId: xxx
+    secretKey: xxx
+    region: ap-xxx
+    bucket: xxx
+
+# Pexels 图片搜索配置
+pexels:
+  apiKey: xxx
+# 生产环境关闭日志
+mybatis-flex:
+  configuration:
+    log-impl: ''
