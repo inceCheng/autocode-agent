@@ -3,6 +3,7 @@ from functools import lru_cache
 from app.config.settings import get_settings
 from app.service.html_service import HtmlGenService
 from app.service.jwt_service import JwtService
+from app.service.multi_file_service import MultiFileGenService
 from app.service.route_service import RouteService
 from app.service.stream_service import StreamService
 
@@ -17,6 +18,12 @@ def get_route_service() -> RouteService:
 def get_html_gen_service() -> HtmlGenService:
     """依赖注入：获取HTML代码生成服务单例"""
     return HtmlGenService()
+
+
+@lru_cache(maxsize=1)
+def get_multi_file_gen_service() -> MultiFileGenService:
+    """依赖注入：获取多文件代码生成服务单例"""
+    return MultiFileGenService()
 
 
 @lru_cache(maxsize=1)

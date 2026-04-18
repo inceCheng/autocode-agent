@@ -83,6 +83,11 @@ def create_app() -> FastAPI:
     html_output_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static/html", StaticFiles(directory=str(html_output_dir)), name="html-static")
 
+    # 将多文件输出目录挂载为静态资源目录
+    multi_file_output_dir = Path(settings.multi_file_output_dir)
+    multi_file_output_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/multi_file", StaticFiles(directory=str(multi_file_output_dir)), name="multi-file-static")
+
     return app
 
 

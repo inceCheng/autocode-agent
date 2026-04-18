@@ -27,6 +27,22 @@ class Settings(BaseSettings):
     # 系统提示词文件路径（相对于项目根目录）
     html_system_prompt_path: str = "app/prompts/codegen-html-system-prompt.txt"
 
+    # ==================== 多文件代码生成模型配置 ====================
+    # 大模型API密钥（默认复用HTML生成密钥）
+    multi_file_codegen_api_key: SecretStr | None = None
+    # 大模型API基础URL
+    multi_file_codegen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # 大模型名称
+    multi_file_codegen_model_name: str = "qwen3.5-flash"
+    # 生成温度参数
+    multi_file_codegen_temperature: float = 0.7
+
+    # ==================== 多文件代码生成输出配置 ====================
+    # 生成的多文件项目保存目录
+    multi_file_output_dir: str = "./output/multi_file"
+    # 系统提示词文件路径
+    multi_file_system_prompt_path: str = "app/prompts/codegen-multi-file-system-prompt.txt"
+
     # ==================== Kafka 配置 ====================
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_topic: str = "agent-generation-tasks"

@@ -5,12 +5,21 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class CompletionMetadata(BaseModel):
-    """任务完成时的元数据"""
+class FileMeta(BaseModel):
+    """单个文件的元信息"""
 
-    filename: str
-    file_path: str
-    url_path: str
+    filename: str = Field(..., description="文件名")
+    file_path: str = Field(..., description="服务器本地绝对路径")
+    url_path: str = Field(..., description="HTTP访问路径")
+
+
+class CompletionMetadata(BaseModel):
+    """任务完成时的元数据，兼容单文件和多文件场景"""
+
+    filename: str | None = Field(default=None, description="主文件名（单文件场景）")
+    file_path: str | None = Field(default=None, description="主文件本地路径（单文件场景）")
+    url_path: str | None = Field(default=None, description="主文件HTTP路径（单文件场景）")
+    files: list[FileMeta] | None = Field(default=None, description="多文件列表（多文件场景）")
 
 
 # ==================== OpenAI chat.completion.chunk 规范 ====================
