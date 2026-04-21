@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str = "HS256"
 
+    # ==================== MySQL 配置 ====================
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: SecretStr = SecretStr("")
+    mysql_database: str = "ai_platform"
+    mysql_pool_size: int = 10
+    mysql_max_overflow: int = 20
+    mysql_pool_recycle: int = 3600
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

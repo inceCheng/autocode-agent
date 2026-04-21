@@ -93,7 +93,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 应用名称暂时为 initPrompt 前 12 位
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
         // 使用 AI 智能选择代码生成类型 调用 Python 服务
-        CodeGenTypeEnum projectType = aiRouteClient.getProjectType(initPrompt);
+        CodeGenTypeEnum projectType = null;
+        try {
+            projectType = aiRouteClient.getProjectType(initPrompt);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "路由失败");
+        }
         app.setCodeGenType(projectType.getValue());
         // 设置预览路径
         LocalDate now = LocalDate.now();
@@ -105,18 +110,18 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 插入数据库
         boolean result = this.save(app);
         // 返回 jwt，并生成 task id ，传入 Kafka 消息队列
-        // TODO: 生成 jwt
+        // 生成 jwt
         HashMap<String, Object> claims = new HashMap<>();
         claims.put("prompt", initPrompt);
         String token = jwtUtils.generateToken(String.valueOf(loginUser.getId()), claims);
-        // TODO: 生成 task id
+        // 生成 task id
         long taskId = new TaskIdGenerator(1).nextId();
         String traceId = TraceIdGenerator.generateTraceId();
-        // TODO: 发送 Kafka 消息
+        //  发送 Kafka 消息
         aiTaskProducer.sendGenerationTask(String.valueOf(taskId), String.valueOf(loginUser.getId()), initPrompt, projectType.getValue(), traceId);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         log.info("应用创建成功，ID: {}, 类型: {}", app.getId(), projectType.getValue());
-        return new AppAddResponse(String.valueOf(taskId), token);
+        return new AppAddResponse(String.valueOf(taskId), app.getId(), token);
     }
 
 

@@ -7,6 +7,7 @@ class TaskInfo(BaseModel):
     task_id: str = Field(alias="taskId")
     user_id: str = Field(alias="userId")
     project_type: str = Field(alias="projectType")
+    app_id: str | None = Field(default=None, alias="appId")
 
     model_config = ConfigDict(populate_by_name=True)
 

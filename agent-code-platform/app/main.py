@@ -14,8 +14,10 @@ for _lib in ("httpx", "httpcore", "aiokafka", "redis", "urllib3"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.config.database import close_db_engine, init_db
 from app.config.kafka import close_kafka_consumer, init_kafka_consumer
 from app.config.redis import close_redis_client, init_redis_client
 from app.config.settings import get_settings
@@ -33,6 +35,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     # ---- Startup ----
+    try:
+        await init_db()
+        logger.info("MySQL数据库已初始化")
+    except Exception:
+        logger.exception("MySQL数据库初始化失败，请检查配置")
+
     try:
         await init_redis_client(settings)
         logger.info("Redis连接已建立")
@@ -61,6 +69,7 @@ async def lifespan(app: FastAPI):
 
     await close_kafka_consumer()
     await close_redis_client()
+    await close_db_engine()
     logger.info("应用资源已清理完毕")
 
 
@@ -70,6 +79,15 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         debug=settings.app_debug,
         lifespan=lifespan,
+    )
+
+    # ==================== CORS配置 ====================
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # ==================== 注册API路由 ====================

@@ -5,8 +5,10 @@ import uuid
 from pathlib import Path
 
 from app.common.enums.project_type import ProjectType
+from app.config.database import get_db_session
 from app.config.kafka import get_kafka_consumer
 from app.config.settings import get_settings
+from app.dao.chat_history_dao import ChatHistoryDao
 from app.dependency.container import (
     get_html_gen_service,
     get_multi_file_gen_service,
@@ -23,14 +25,50 @@ from app.service.vue_project_service import AgentEventType, VueProjectGenService
 logger = logging.getLogger(__name__)
 
 
+def _resolve_app_id(task_info) -> int:
+    """从TaskInfo中解析app_id，优先使用显式app_id，否则尝试将task_id转为int"""
+    if task_info.app_id is not None:
+        try:
+            return int(task_info.app_id)
+        except (ValueError, TypeError):
+            pass
+    try:
+        return int(task_info.task_id)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _resolve_user_id(task_info) -> int:
+    """将user_id字符串解析为int"""
+    try:
+        return int(task_info.user_id)
+    except (ValueError, TypeError):
+        return 0
+
+
+async def _save_chat_history(message: str, message_type: str, app_id: int, user_id: int) -> None:
+    """保存对话历史到MySQL"""
+    try:
+        async with get_db_session() as session:
+            await ChatHistoryDao.insert(session, message, message_type, app_id, user_id)
+            logger.info("保存chat_history成功: app_id=%s, type=%s", app_id, message_type)
+    except Exception:
+        logger.exception("保存chat_history失败: app_id=%s, type=%s", app_id, message_type)
+
+
 async def _handle_html(
     task_id: str,
     prompt: str,
     completion_id: str,
+    app_id: int,
+    user_id: int,
     stream_service: StreamService,
     html_service: HtmlGenService,
 ) -> None:
     """处理 HTML 单文件生成任务"""
+    # 保存用户消息
+    await _save_chat_history(prompt, "user", app_id, user_id)
+
     seq = 0
     full_content: list[str] = []
 
@@ -58,6 +96,9 @@ async def _handle_html(
         seq=seq, metadata=metadata.model_dump(exclude_none=True), completion_id=completion_id,
     )
     await stream_service.push_done(task_id, done_chunk)
+
+    # 保存AI完整响应
+    await _save_chat_history(raw_content, "ai", app_id, user_id)
     logger.info("HTML任务处理完成: task_id=%s, file=%s", task_id, filename)
 
 
@@ -65,10 +106,15 @@ async def _handle_multi_file(
     task_id: str,
     prompt: str,
     completion_id: str,
+    app_id: int,
+    user_id: int,
     stream_service: StreamService,
     multi_file_service: MultiFileGenService,
 ) -> None:
     """处理 MULTI_FILE 多文件生成任务"""
+    # 保存用户消息
+    await _save_chat_history(prompt, "user", app_id, user_id)
+
     seq = 0
     full_content: list[str] = []
 
@@ -94,6 +140,9 @@ async def _handle_multi_file(
         seq=seq, metadata=metadata.model_dump(exclude_none=True), completion_id=completion_id,
     )
     await stream_service.push_done(task_id, done_chunk)
+
+    # 保存AI完整响应
+    await _save_chat_history(raw_content, "ai", app_id, user_id)
     logger.info(
         "MULTI_FILE任务处理完成: task_id=%s, dir=%s, files=%d",
         task_id, dir_name, len(file_metas),
@@ -104,12 +153,18 @@ async def _handle_vue_project(
     task_id: str,
     prompt: str,
     completion_id: str,
+    app_id: int,
+    user_id: int,
     stream_service: StreamService,
     vue_project_service: VueProjectGenService,
 ) -> None:
     """处理 VUE_PROJECT 工程项目生成任务：通过 Agent + Tool Calling 流式生成"""
+    # 保存用户消息
+    await _save_chat_history(prompt, "user", app_id, user_id)
+
     seq = 0
     settings = get_settings()
+    text_content_parts: list[str] = []
 
     # 创建项目目录
     dir_name = VueProjectGenService.generate_dir_name()
@@ -118,6 +173,7 @@ async def _handle_vue_project(
 
     async for event in vue_project_service.generate_stream(prompt, project_dir):
         if event.type == AgentEventType.TEXT:
+            text_content_parts.append(event.content)
             chunk = ChatCompletionChunk.new_content(
                 seq=seq, content=event.content, completion_id=completion_id,
             )
@@ -128,9 +184,11 @@ async def _handle_vue_project(
             tool_info = {"type": "tool_call", "action": event.tool_name}
             if event.tool_input and event.tool_input.get("path"):
                 tool_info["path"] = event.tool_input["path"]
+            tool_json = json.dumps(tool_info, ensure_ascii=False)
+            text_content_parts.append(tool_json)
             chunk = ChatCompletionChunk.new_content(
                 seq=seq,
-                content=json.dumps(tool_info, ensure_ascii=False),
+                content=tool_json,
                 completion_id=completion_id,
             )
             await stream_service.push_chunk(task_id, chunk)
@@ -143,9 +201,11 @@ async def _handle_vue_project(
                     tool_info["path"] = event.tool_input["path"]
                 if "content" in event.tool_input and event.tool_input["content"] is not None:
                     tool_info["content"] = event.tool_input["content"]
+            tool_json = json.dumps(tool_info, ensure_ascii=False)
+            text_content_parts.append(tool_json)
             chunk = ChatCompletionChunk.new_content(
                 seq=seq,
-                content=json.dumps(tool_info, ensure_ascii=False),
+                content=tool_json,
                 completion_id=completion_id,
             )
             await stream_service.push_chunk(task_id, chunk)
@@ -160,6 +220,10 @@ async def _handle_vue_project(
         seq=seq, metadata=metadata.model_dump(exclude_none=True), completion_id=completion_id,
     )
     await stream_service.push_done(task_id, done_chunk)
+
+    # 保存AI完整响应（拼接所有文本和工具调用信息）
+    raw_content = "".join(text_content_parts)
+    await _save_chat_history(raw_content, "ai", app_id, user_id)
     logger.info(
         "VUE_PROJECT任务处理完成: task_id=%s, dir=%s, files=%d",
         task_id, dir_name, len(file_metas),
@@ -176,6 +240,7 @@ async def kafka_consumer_worker() -> None:
     - VUE_PROJECT: Vue3工程项目生成（Agent + Tool Calling）
 
     每个 Chunk 以 OpenAI chat.completion.chunk 格式通过 Redis 持久化 + 广播。
+    任务完成后，将对话历史保存到 MySQL。
     """
     consumer = get_kafka_consumer()
     stream_service: StreamService = get_stream_service()
@@ -191,10 +256,12 @@ async def kafka_consumer_worker() -> None:
                 task_id = event.task.task_id
                 prompt = event.payload.prompt
                 project_type = event.task.project_type
+                app_id = _resolve_app_id(event.task)
+                user_id = _resolve_user_id(event.task)
 
                 logger.info(
-                    "开始处理Kafka任务: task_id=%s, trace_id=%s, projectType=%s",
-                    task_id, event.trace_id, project_type,
+                    "开始处理Kafka任务: task_id=%s, trace_id=%s, projectType=%s, app_id=%s, user_id=%s",
+                    task_id, event.trace_id, project_type, app_id, user_id,
                 )
 
                 completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -203,15 +270,18 @@ async def kafka_consumer_worker() -> None:
                 pt_lower = project_type.lower()
                 if pt_lower == ProjectType.MULTI_FILE.value.lower():
                     await _handle_multi_file(
-                        task_id, prompt, completion_id, stream_service, multi_file_service,
+                        task_id, prompt, completion_id, app_id, user_id,
+                        stream_service, multi_file_service,
                     )
                 elif pt_lower == ProjectType.VUE_PROJECT.value.lower():
                     await _handle_vue_project(
-                        task_id, prompt, completion_id, stream_service, vue_project_service,
+                        task_id, prompt, completion_id, app_id, user_id,
+                        stream_service, vue_project_service,
                     )
                 else:
                     await _handle_html(
-                        task_id, prompt, completion_id, stream_service, html_service,
+                        task_id, prompt, completion_id, app_id, user_id,
+                        stream_service, html_service,
                     )
 
                 # 处理成功，手动提交offset
