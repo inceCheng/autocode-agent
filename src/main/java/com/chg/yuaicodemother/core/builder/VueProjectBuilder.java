@@ -1,5 +1,7 @@
 package com.chg.yuaicodemother.core.builder;
 
+import cn.hutool.core.io.IoUtil;
+import cn.hutool.core.util.CharsetUtil;
 import cn.hutool.core.util.RuntimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -99,7 +101,12 @@ public class VueProjectBuilder {
                 log.info("命令执行成功: {}", command);
                 return true;
             } else {
-                log.error("命令执行失败，退出码: {}", exitCode);
+                // ⭐ 核心修改：读取进程的错误输出流
+                String errorOutput = IoUtil.read(process.getErrorStream(), CharsetUtil.CHARSET_UTF_8);
+                String standardOutput = IoUtil.read(process.getInputStream(), CharsetUtil.CHARSET_UTF_8);
+
+                log.error("命令执行失败，退出码: {} \n错误输出: {} \n标准输出: {}",
+                        exitCode, errorOutput, standardOutput);
                 return false;
             }
         } catch (Exception e) {

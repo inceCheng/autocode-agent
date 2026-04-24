@@ -72,8 +72,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private VueProjectBuilder vueProjectBuilder;
     @Resource
     private ScreenshotService screenshotService;
-    @Resource
-    private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
     @Resource
     private JwtUtils jwtUtils;
@@ -109,6 +107,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setPreviewPath(datePath);
         // 插入数据库
         boolean result = this.save(app);
+        Long appId = app.getId();
+        boolean res = chatHistoryService.addChatMessage(appId, initPrompt, "user", loginUser.getId());
+        ThrowUtils.throwIf(!res, ErrorCode.SYSTEM_ERROR, "聊天记录持久化失败");
         // 返回 jwt，并生成 task id ，传入 Kafka 消息队列
         // 生成 jwt
         HashMap<String, Object> claims = new HashMap<>();
@@ -118,10 +119,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         long taskId = new TaskIdGenerator(1).nextId();
         String traceId = TraceIdGenerator.generateTraceId();
         //  发送 Kafka 消息
-        aiTaskProducer.sendGenerationTask(String.valueOf(taskId), String.valueOf(loginUser.getId()), initPrompt, projectType.getValue(), traceId);
+        aiTaskProducer.sendGenerationTask(String.valueOf(taskId), String.valueOf(loginUser.getId()), String.valueOf(appId), initPrompt, projectType.getValue(), traceId, datePath);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        log.info("应用创建成功，ID: {}, 类型: {}", app.getId(), projectType.getValue());
-        return new AppAddResponse(String.valueOf(taskId), app.getId(), token);
+        log.info("应用创建成功，ID: {}, 类型: {}", appId, projectType.getValue());
+        return new AppAddResponse(String.valueOf(taskId), appId, token);
     }
 
 

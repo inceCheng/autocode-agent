@@ -42,6 +42,28 @@ spring:
       # 序列化器配置：Key 使用 String，Value 使用 Spring 提供的 JSON 序列化器
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: chat-history-consumer-group
+      # 自动 offset 重置策略：earliest 表示从最早的未消费消息开始读取
+      auto-offset-reset: earliest
+      # 关闭自动提交 offset，改为手动提交，确保消息至少被处理一次
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # 单次 poll 最大拉取条数，控制每次消费的消息量
+        max.poll.records: 100
+        # 两次 poll 之间的最大间隔，超时将触发消费者组 rebalance
+        max.poll.interval.ms: 300000
+        # 会话超时时间，超时未收到心跳则认为消费者挂掉
+        session.timeout.ms: 30000
+        # 心跳发送间隔，应小于 session.timeout.ms
+        heartbeat.interval.ms: 10000
+    listener:
+      # 手动确认模式，消费成功后才提交 offset
+      ack-mode: manual
+      # 并发消费者线程数，可根据 Kafka partition 数量和 CPU 核数调整
+      concurrency: 3
 
 server:
   port: 8123

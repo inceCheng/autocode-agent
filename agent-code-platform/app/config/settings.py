@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # 生成温度参数，控制创造性（0.0=确定性，1.0=高随机性）
     html_codegen_temperature: float = 0.7
 
+    # ==================== 代码输出根目录配置 ====================
+    # 代码输出根目录（对应Java的 CODE_OUTPUT_ROOT_DIR），相对项目根目录的上一级
+    code_output_root_dir: str = "../tmp/code_output"
+    # 预览路径，格式如 /2026/04/23（暂时写死，后期加动态逻辑）
+    preview_path: str = "/2026/04/23"
+
     # ==================== HTML代码生成输出配置 ====================
     # 生成的HTML文件保存目录（相对于项目根目录）
     html_output_dir: str = "./output/html"
@@ -69,6 +75,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_topic: str = "agent-generation-tasks"
     kafka_consumer_group: str = "agent-code-platform-worker"
+    kafka_result_topic: str = "task-result-topic"
 
     # ==================== Redis 配置 ====================
     redis_host: str = "localhost"
@@ -81,16 +88,6 @@ class Settings(BaseSettings):
     # Base64编码的密钥，必须与Java后端 jwt.secret 保持一致
     jwt_secret: str
     jwt_algorithm: str = "HS256"
-
-    # ==================== MySQL 配置 ====================
-    mysql_host: str = "localhost"
-    mysql_port: int = 3306
-    mysql_user: str = "root"
-    mysql_password: SecretStr = SecretStr("")
-    mysql_database: str = "ai_platform"
-    mysql_pool_size: int = 10
-    mysql_max_overflow: int = 20
-    mysql_pool_recycle: int = 3600
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -117,8 +117,23 @@ class MultiFileGenService:
                 detail="流式调用大模型失败，请稍后重试",
             )
 
+    def _build_output_path(self, app_id: int,preview) -> Path:
+        """
+        构建输出路径：{CODE_OUTPUT_ROOT_DIR}/{previewPath}/multi_file_{appId}/
+
+        Args:
+            app_id: 应用ID
+
+        Returns:
+            输出目录的 Path 对象
+        """
+        settings = get_settings()
+        output_dir = Path(settings.code_output_root_dir) / preview / f"multi_file_{app_id}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+
     async def save_files(
-        self, dir_name: str, files: dict[str, str]
+        self, dir_name: str, files: dict[str, str], app_id: int, preview_path: str,
     ) -> list[FileMeta]:
         """
         将提取出的代码保存到独立目录，返回文件元信息列表。
@@ -126,15 +141,19 @@ class MultiFileGenService:
         Args:
             dir_name: 目录名（由 generate_dir_name 生成）
             files: 提取出的代码字典，key 为 html/css/js
+            app_id: 应用ID，用于构建输出路径
 
         Returns:
             FileMeta 列表
         """
-        project_dir = self._output_dir / dir_name
+        base_output_dir = self._build_output_path(app_id,preview_path)
+        project_dir = base_output_dir
         project_dir.mkdir(parents=True, exist_ok=True)
 
         filename_map = {"html": "index.html", "css": "style.css", "js": "script.js"}
         result: list[FileMeta] = []
+
+        preview = preview_path.lstrip("/")
 
         for file_type, content in files.items():
             filename = filename_map.get(file_type, f"main.{file_type}")
@@ -144,11 +163,13 @@ class MultiFileGenService:
                     file_path, mode="w", encoding="utf-8"
                 ) as f:
                     await f.write(content)
+                # 新路径格式: /static/output/{preview_path}/multi_file_{appId}/{dir_name}/{filename}
+                url_path = f"/static/output/{preview}/multi_file_{app_id}/{dir_name}/{filename}"
                 result.append(
                     FileMeta(
                         filename=filename,
                         file_path=str(file_path.resolve()),
-                        url_path=f"/static/multi_file/{dir_name}/{filename}",
+                        url_path=url_path,
                     )
                 )
                 logger.info("文件已保存: %s", file_path)

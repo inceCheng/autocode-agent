@@ -18,6 +18,8 @@ public class AiTaskEvent {
     public static class TaskInfo {
         private String taskId;
         private String userId;
+        private String appId;
+        private String previewPath;
         private String projectType; // 智能路由结果: HTML/VUE_PROJECT 等
     }
 

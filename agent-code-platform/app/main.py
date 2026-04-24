@@ -17,8 +17,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config.database import close_db_engine, init_db
 from app.config.kafka import close_kafka_consumer, init_kafka_consumer
+from app.config.kafka_producer import close_kafka_producer, init_kafka_producer
 from app.config.redis import close_redis_client, init_redis_client
 from app.config.settings import get_settings
 from app.controller.html_controller import router as html_router
@@ -36,12 +36,6 @@ async def lifespan(app: FastAPI):
 
     # ---- Startup ----
     try:
-        await init_db()
-        logger.info("MySQL数据库已初始化")
-    except Exception:
-        logger.exception("MySQL数据库初始化失败，请检查配置")
-
-    try:
         await init_redis_client(settings)
         logger.info("Redis连接已建立")
     except Exception:
@@ -52,6 +46,12 @@ async def lifespan(app: FastAPI):
         logger.info("Kafka消费者已启动")
     except Exception:
         logger.exception("Kafka初始化失败，请检查配置")
+
+    try:
+        await init_kafka_producer(settings)
+        logger.info("Kafka生产者已启动")
+    except Exception:
+        logger.exception("Kafka生产者初始化失败，请检查配置")
 
     # 启动Kafka消费后台任务
     consumer_task = asyncio.create_task(kafka_consumer_worker())
@@ -67,9 +67,9 @@ async def lifespan(app: FastAPI):
         pass
     logger.info("Kafka消费者Worker已停止")
 
+    await close_kafka_producer()
     await close_kafka_consumer()
     await close_redis_client()
-    await close_db_engine()
     logger.info("应用资源已清理完毕")
 
 
@@ -96,20 +96,11 @@ def create_app() -> FastAPI:
     app.include_router(stream_router, prefix="/api/ai", tags=["ai"])
 
     # ==================== 挂载静态文件服务 ====================
-    # 将HTML输出目录挂载为静态资源目录，使生成的HTML文件可通过URL直接访问
-    html_output_dir = Path(settings.html_output_dir)
-    html_output_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/static/html", StaticFiles(directory=str(html_output_dir)), name="html-static")
-
-    # 将多文件输出目录挂载为静态资源目录
-    multi_file_output_dir = Path(settings.multi_file_output_dir)
-    multi_file_output_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/static/multi_file", StaticFiles(directory=str(multi_file_output_dir)), name="multi-file-static")
-
-    # 将Vue工程项目输出目录挂载为静态资源目录
-    vue_project_output_dir = Path(settings.vue_project_output_dir)
-    vue_project_output_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/static/vue_project", StaticFiles(directory=str(vue_project_output_dir)), name="vue-project-static")
+    # 挂载代码输出根目录（上一级目录的 static/output），使生成的文件可通过URL直接访问
+    # 路径格式: {code_output_root_dir}/{preview_path}/{type}_{appId}/
+    code_output_dir = Path(settings.code_output_root_dir).resolve()
+    code_output_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/code_output", StaticFiles(directory=str(code_output_dir)), name="code-output-static")
 
     return app
 

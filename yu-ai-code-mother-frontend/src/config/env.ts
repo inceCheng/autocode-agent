@@ -1,7 +1,7 @@
 /**
  * 环境变量配置
  */
-import {CodeGenTypeEnum} from "@/utils/codeGenTypes.ts";
+import { CodeGenTypeEnum } from '@/utils/codeGenTypes.ts'
 
 // 应用部署域名
 export const DEPLOY_DOMAIN = import.meta.env.VITE_DEPLOY_DOMAIN || 'http://localhost'
@@ -98,8 +98,9 @@ export const getStaticPreviewUrl = (
     if (relative.endsWith('.html')) {
       return baseDir.includes('#') ? baseDir : `${baseDir}#/`
     }
+    console.log('url:' + `${withTrailingDir(baseDir)}index.html`)
     return `${withTrailingDir(baseDir)}dist/index.html#/`
   }
 
-  return relative.endsWith('.html') ? baseDir : withTrailingDir(baseDir)
+  return relative.endsWith('.html') ? baseDir : `${withTrailingDir(baseDir)}index.html`
 }

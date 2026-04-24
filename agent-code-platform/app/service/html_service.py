@@ -142,7 +142,22 @@ class HtmlGenService:
         )
         return prompt_template | self._llm
 
-    async def _save_html_file(self, html_content: str, filename: str) -> Path:
+    def _build_output_path(self, app_id: int,preview:str) -> Path:
+        """
+        构建输出路径：{CODE_OUTPUT_ROOT_DIR}/{previewPath}/html_{appId}/
+
+        Args:
+            app_id: 应用ID
+
+        Returns:
+            输出目录的 Path 对象
+        """
+        settings = get_settings()
+        output_dir = Path(settings.code_output_root_dir) / preview / f"html_{app_id}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+
+    async def _save_html_file(self, html_content: str, filename: str, app_id: int,preview_path:str) -> Path:
         """
         将纯HTML内容异步写入本地文件。
 
@@ -151,11 +166,13 @@ class HtmlGenService:
         Args:
             html_content: 纯净的HTML源码
             filename: 目标文件名
+            app_id: 应用ID，用于构建输出路径
 
         Returns:
             写入文件的完整 Path 对象
         """
-        file_path = self._output_dir / filename
+        output_dir = self._build_output_path(app_id,preview_path)
+        file_path = output_dir/filename
         try:
             async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
                 await f.write(html_content)
@@ -174,7 +191,7 @@ class HtmlGenService:
                 detail=f"保存HTML文件失败: {file_path}",
             )
 
-    async def generate(self, prompt: str) -> HtmlGenResponse:
+    async def generate(self, prompt: str, app_id: int = 0) -> HtmlGenResponse:
         """
         HTML生成的完整业务编排方法。
 
@@ -187,6 +204,7 @@ class HtmlGenService:
 
         Args:
             prompt: 用户的网页需求自然语言描述
+            app_id: 应用ID，用于构建输出路径，默认为0
 
         Returns:
             包含文件名、路径与执行状态的响应对象
@@ -202,13 +220,17 @@ class HtmlGenService:
 
         # Step 4: 生成唯一文件名并异步保存到本地
         filename = self._generate_filename()
-        saved_path = await self._save_html_file(html_content, filename)
+        saved_path = await self._save_html_file(html_content, filename, app_id)
 
         # Step 5: 构建响应（绝对路径 + URL访问路径）
+        # 新路径格式: /static/output/{preview_path}/html_{appId}/{filename}
+        settings = get_settings()
+        preview = settings.preview_path.lstrip("/")
+        url_path = f"/static/output/{preview}/html_{app_id}/{filename}"
         return HtmlGenResponse(
             filename=filename,
             file_path=str(saved_path.resolve()),
-            url_path=f"/static/html/{filename}",
+            url_path=url_path,
             status="success",
         )
 

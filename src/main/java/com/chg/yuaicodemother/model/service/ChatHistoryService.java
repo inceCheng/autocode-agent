@@ -1,5 +1,6 @@
 package com.chg.yuaicodemother.model.service;
 
+import com.chg.yuaicodemother.kafka.TaskResultEvent;
 import com.chg.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.chg.yuaicodemother.model.entity.User;
 import com.mybatisflex.core.paginate.Page;
@@ -9,6 +10,7 @@ import com.chg.yuaicodemother.model.entity.ChatHistory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 对话历史 服务层。
@@ -66,4 +68,14 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 删除操作是否成功执行，true表示成功，false表示失败
      */
     boolean deleteByAppId(Long appId);
+
+    /**
+     * 批量插入对话历史记录（流式落库场景）。
+     * <p>
+     * 将 Kafka 消费到的 TaskResultEvent 列表批量转换为 ChatHistory 并入库，
+     * 减少 DB 交互次数，提升写入吞吐。
+     *
+     * @param events 待入库的任务结果事件列表
+     */
+    void batchInsertChatHistory(List<TaskResultEvent> events);
 }

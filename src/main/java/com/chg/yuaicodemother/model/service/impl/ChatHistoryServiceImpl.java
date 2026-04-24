@@ -6,11 +6,13 @@ import com.chg.yuaicodemother.ai.AiCodeGeneratorService;
 import com.chg.yuaicodemother.constant.UserConstant;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.exception.ThrowUtils;
+import com.chg.yuaicodemother.kafka.TaskResultEvent;
 import com.chg.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.chg.yuaicodemother.model.entity.App;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.chg.yuaicodemother.model.service.AppService;
+import com.chg.yuaicodemother.utils.ContentFormatUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
@@ -26,8 +28,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.time.LocalDateTime;
 
 /**
  * 对话历史 服务层实现。
@@ -179,6 +182,28 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
         QueryWrapper queryWrapper = QueryWrapper.create().eq("appId", appId);
         return this.remove(queryWrapper);
+    }
+
+    @Override
+    public void batchInsertChatHistory(List<TaskResultEvent> events) {
+        if (CollUtil.isEmpty(events)) {
+            return;
+        }
+        List<ChatHistory> chatHistoryList = new ArrayList<>(events.size());
+        for (TaskResultEvent event : events) {
+            String formattedContent = ContentFormatUtil.format(event.getContent());
+            ChatHistory chatHistory = ChatHistory.builder()
+                    .appId(event.getAppId())
+                    .message(formattedContent)
+                    .messageType(event.getMessageType())
+                    .userId(event.getUserId())
+                    .build();
+            chatHistoryList.add(chatHistory);
+        }
+        boolean success = this.saveBatch(chatHistoryList);
+        if (!success) {
+            log.error("批量插入对话历史失败，共 {} 条", chatHistoryList.size());
+        }
     }
 
 

@@ -21,12 +21,12 @@ public class AiTaskProducer {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-    public void sendGenerationTask(String taskId, String userId, String prompt, String projectType, String traceId) {
+    public void sendGenerationTask(String taskId, String userId, String appId, String prompt, String projectType, String traceId, String previewPath) {
         AiTaskEvent event = new AiTaskEvent(
                 UUID.randomUUID().toString(),
                 System.currentTimeMillis(),
                 traceId,
-                new AiTaskEvent.TaskInfo(taskId, userId, projectType),
+                new AiTaskEvent.TaskInfo(taskId, userId, appId, previewPath, projectType),
                 new AiTaskEvent.Payload(prompt, Collections.emptyList())
         );
 

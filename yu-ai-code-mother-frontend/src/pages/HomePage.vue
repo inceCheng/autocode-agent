@@ -119,9 +119,16 @@ const loadFeaturedApps = async () => {
 }
 
 // 查看对话
+// const viewChat = (appId: string | number | undefined) => {
+//   if (appId) {
+//     router.push(`/app/chat/${appId}?view=1`)
+//   }
+// }
+// 查看对话
 const viewChat = (appId: string | number | undefined) => {
   if (appId) {
-    router.push(`/app/chat/${appId}?view=1`)
+    // 💡 修复：补上 appId 的 Query 参数
+    router.push(`/app/chat/${appId}?appId=${appId}&view=1`)
   }
 }
 

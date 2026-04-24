@@ -14,6 +14,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // '/api/v1/static': {
+      //   target: 'http://localhost:80', // 指向 Nginx
+      //   changeOrigin: true,
+      // },
       '/api/ai/stream': {
         target: 'http://localhost:8000',
         changeOrigin: true,
