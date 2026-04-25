@@ -18,6 +18,7 @@ import com.chg.yuaicodemother.kafka.AiTaskProducer;
 import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
 import com.chg.yuaicodemother.model.dto.app.AppAddResponse;
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.chg.yuaicodemother.model.entity.AiGenerationTask;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
@@ -35,6 +36,9 @@ import com.chg.yuaicodemother.model.service.AppService;
 import jakarta.annotation.Resource;
 import jakarta.websocket.OnClose;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -43,7 +47,10 @@ import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import static com.chg.yuaicodemother.constant.AiGenerationTaskConstant.*;
 
 /**
  * 应用 服务层实现。
@@ -56,26 +63,24 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource
     private UserServiceImpl userService;
-
     @Resource
     private AiCodeGeneratorFacade aiCodeGeneratorFacade;
-
     @Resource
     private ChatHistoryService chatHistoryService;
-
     @Resource
     private AiRouteClient aiRouteClient;
-
     @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
     @Resource
     private VueProjectBuilder vueProjectBuilder;
     @Resource
     private ScreenshotService screenshotService;
-
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private AiGenerationTaskServiceImpl aiGenerationTaskService;
     @Resource
     private JwtUtils jwtUtils;
-
     @Resource
     private AiTaskProducer aiTaskProducer;
 
@@ -89,6 +94,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
         // 应用名称暂时为 initPrompt 前 12 位
+        // TODO 使用 AI 智能总结标题
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
         // 使用 AI 智能选择代码生成类型 调用 Python 服务
         CodeGenTypeEnum projectType = null;
@@ -109,17 +115,36 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean result = this.save(app);
         Long appId = app.getId();
         boolean res = chatHistoryService.addChatMessage(appId, initPrompt, "user", loginUser.getId());
-        ThrowUtils.throwIf(!res, ErrorCode.SYSTEM_ERROR, "聊天记录持久化失败");
+        ThrowUtils.throwIf(!res, ErrorCode.SYSTEM_ERROR, "聊天创建失败，请稍后重试～");
         // 返回 jwt，并生成 task id ，传入 Kafka 消息队列
-        // 生成 jwt
         HashMap<String, Object> claims = new HashMap<>();
         claims.put("prompt", initPrompt);
         String token = jwtUtils.generateToken(String.valueOf(loginUser.getId()), claims);
         // 生成 task id
         long taskId = new TaskIdGenerator(1).nextId();
         String traceId = TraceIdGenerator.generateTraceId();
+        AiGenerationTask aiGenerationTask = AiGenerationTask.builder()
+                .appId(appId)
+                .taskId(String.valueOf(taskId))
+                .projectType(projectType.getValue())
+                .status(PENDING)
+                .userId(loginUser.getId())
+                .retryCount(RETRY_COUNT)
+                .maxRetryCount(MAX_RETRY_COUNT)
+                .version(DEFAULT_VERSION)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        // 状态落库
+        boolean save = aiGenerationTaskService.save(aiGenerationTask);
+        ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR,"应用状态更新失败，请稍候重试～");
         //  发送 Kafka 消息
-        aiTaskProducer.sendGenerationTask(String.valueOf(taskId), String.valueOf(loginUser.getId()), String.valueOf(appId), initPrompt, projectType.getValue(), traceId, datePath);
+        aiTaskProducer.sendGenerationTask(String.valueOf(taskId),
+                String.valueOf(loginUser.getId()),
+                String.valueOf(appId), initPrompt,
+                projectType.getValue(), traceId, datePath);
+        // 同步 redis 中 task 的状态
+        stringRedisTemplate.opsForValue().set(STATUS_KEY_PREFIX + taskId, PENDING, TASK_TIMEOUT, TimeUnit.HOURS);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         log.info("应用创建成功，ID: {}, 类型: {}", appId, projectType.getValue());
         return new AppAddResponse(String.valueOf(taskId), appId, token);

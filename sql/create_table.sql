@@ -66,3 +66,34 @@ USE yu_ai_code_mother;
 -- 为 app 表增加 previewPath 列
 ALTER TABLE app
     ADD COLUMN previewPath varchar(512) NULL COMMENT '预览路径' AFTER deployKey;
+
+create table ai_generation_task (
+                                    id bigint primary key auto_increment,
+
+                                    taskId varchar(64) not null unique,
+                                    appId bigint not null,
+                                    userId bigint not null,
+
+                                    projectType varchar(32) not null,
+                                    status varchar(32) not null,
+
+                                    retryCount int not null default 0,
+                                    maxRetryCount int not null default 3,
+
+                                    errorCode varchar(64) null,
+                                    errorMessage varchar(1000) null,
+
+                                    requestPayload json null,
+                                    resultContent longtext null,
+
+                                    createdAt datetime not null,
+                                    updatedAt datetime not null,
+                                    startedAt datetime null,
+                                    finishedAt datetime null,
+
+                                    version int not null default 0,
+
+                                    index idx_app_id (appId),
+                                    index idx_user_id (userId),
+                                    index idx_status_updated_at (status, updatedAt)
+);

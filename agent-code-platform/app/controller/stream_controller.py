@@ -1,16 +1,22 @@
 import asyncio
 import logging
+import time
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
+from app.config.settings import get_settings
 from app.dependency.container import get_jwt_service, get_stream_service
 from app.model.request.stream_request import StreamRequest
-from app.model.response.stream_response import ChatCompletionChunk
 from app.service.jwt_service import JwtService
-from app.service.stream_service import StreamService
+from app.service.stream_service import (
+    StreamEvent,
+    StreamEventType,
+    StreamService,
+    stream_event_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,38 +25,38 @@ router = APIRouter()
 
 @router.post("/stream")
 async def stream_task(
-    request: StreamRequest,
+    request_body: StreamRequest,
+    http_request: Request,
     jwt_service: Annotated[JwtService, Depends(get_jwt_service)] = None,  # noqa: RUF013
     stream_service: Annotated[StreamService, Depends(get_stream_service)] = None,  # noqa: RUF013
 ) -> EventSourceResponse:
     """
-    SSE流式接口：通过Redis历史回放 + PubSub实时订阅，向前端推送代码生成Chunk。
+    SSE流式接口：通过Redis Stream历史回放 + XREAD 阻塞读取推送生成事件。
 
-    返回格式兼容OpenAI chat.completion.chunk规范，最终发送 data: [DONE] 关闭流。
-
-    流程：
-    1. 校验JWT Token
-    2. 从Redis List回放历史Chunk
-    3. 订阅Redis PubSub接收增量Chunk（基于seq去重）
-    4. 收到finish_reason=stop后发送[DONE]并关闭连接
+    连接关闭不表示成功；前端应以显式 done/error 事件判断终态。
     """
-    # Step 0: JWT校验
     try:
-        claims = jwt_service.validate_token(request.token)
+        claims = jwt_service.validate_token(request_body.token)
         logger.info(
             "JWT校验通过: task_id=%s, user_id=%s",
-            request.task_id,
+            request_body.task_id,
             claims.get("sub"),
         )
     except jwt.ExpiredSignatureError:
-        logger.warning("JWT令牌已过期: task_id=%s", request.task_id)
-        raise HTTPException(status_code=401, detail="JWT令牌已过期")
+        logger.warning("JWT令牌已过期: task_id=%s", request_body.task_id)
+        raise HTTPException(status_code=401, detail="JWT令牌已过期") from None
     except jwt.InvalidTokenError:
-        logger.warning("JWT令牌无效: task_id=%s", request.task_id)
-        raise HTTPException(status_code=401, detail="JWT令牌无效")
+        logger.warning("JWT令牌无效: task_id=%s", request_body.task_id)
+        raise HTTPException(status_code=401, detail="JWT令牌无效") from None
+
+    last_event_id = (
+        request_body.last_event_id
+        or http_request.headers.get("last-event-id")
+        or http_request.headers.get("Last-Event-ID")
+    )
 
     return EventSourceResponse(
-        _event_generator(request.task_id, stream_service),
+        _event_generator(request_body.task_id, stream_service, last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -59,151 +65,84 @@ async def stream_task(
         },
     )
 
-async def _event_generator(task_id: str, stream_service: StreamService):
-    """SSE事件生成器：先订阅 -> 后回放 -> 持续监听(带心跳) -> seq去重"""
-    last_seq = -1
-    pubsub = None
+
+async def _event_generator(
+    task_id: str,
+    stream_service: StreamService,
+    last_event_id: str | None,
+):
+    """SSE事件生成器：Stream历史回放 -> XREAD阻塞监听 -> 心跳/空闲超时。"""
+    settings = get_settings()
+    redis_last_id = last_event_id or "0-0"
+    idle_started_at = time.monotonic()
 
     try:
-        # 👑【核心修复 1】：先订阅 PubSub！确保不错过任何增量消息
-        pubsub = await stream_service.subscribe_channel(task_id)
-
-        # Step 1: 获取历史并回放
         try:
-            history = await stream_service.replay_history(task_id)
-            logger.info("历史回放: task_id=%s, chunks=%d", task_id, len(history))
-            for chunk in history:
-                last_seq = max(last_seq, chunk.seq)
-                _log_chunk(task_id, chunk, "回放")
-                yield ServerSentEvent(data=chunk.model_dump_json())
+            history = await stream_service.replay_history(
+                task_id,
+                last_event_id=last_event_id,
+            )
+            logger.info("历史回放: task_id=%s, events=%d", task_id, len(history))
+            for event in history:
+                redis_last_id = event.id
+                _log_event(task_id, event, "回放")
+                yield _to_sse(event)
+                if event.event in {StreamEventType.DONE, StreamEventType.ERROR}:
+                    logger.info("历史中已包含终态事件，关闭SSE: task_id=%s", task_id)
+                    return
         except Exception:
-            logger.exception("回放历史Chunk失败: task_id=%s", task_id)
+            logger.exception("回放Redis Stream失败: task_id=%s", task_id)
 
-        # 如果历史中已包含完成信号，直接关闭
-        if history and any(c.is_done for c in history):
-            logger.info("历史中已包含完成信号，关闭SSE: task_id=%s", task_id)
-            yield ServerSentEvent(data="[DONE]")
-            return
-
-        # Step 2: 监听增量 Chunk (使用超时机制替代无尽阻塞)
         while True:
-            # 👑【核心修复 2】：使用 get_message 并设置 timeout，防止长时间无输出导致网关掐断
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
-
-            # 如果 15 秒内没有任何消息（AI 正在长时间思考），发送 SSE 心跳注释
-            if message is None:
+            events = await stream_service.read_new_events(
+                task_id,
+                last_event_id=redis_last_id,
+                block_ms=settings.redis_stream_block_ms,
+            )
+            if not events:
                 logger.debug("SSE心跳保活: task_id=%s", task_id)
-                # 发送格式为 ": ping\n\n" 的 SSE 注释，前端 EventSource 会自动忽略
-                yield ServerSentEvent(comment="ping")
+                yield ServerSentEvent(
+                    event="ping",
+                    data='{"event":"ping"}',
+                )
+                idle_seconds = time.monotonic() - idle_started_at
+                if idle_seconds >= settings.redis_sse_idle_timeout_sec:
+                    logger.info(
+                        "SSE等待超时，关闭本次连接但不标记失败: task_id=%s",
+                        task_id,
+                    )
+                    return
                 continue
 
-            # 处理收到的消息
-            raw_data = message["data"]
-            if isinstance(raw_data, bytes):
-                raw_data = raw_data.decode("utf-8")
-
-            try:
-                chunk = ChatCompletionChunk.model_validate_json(raw_data)
-            except Exception:
-                logger.exception("反序列化PubSub消息失败: %s", raw_data)
-                continue
-
-            # 基于 seq 去重：跳过已在历史中回放过的，或者在订阅缝隙中重复收到的 Chunk
-            if chunk.seq <= last_seq:
-                logger.debug("SSE去重跳过: task_id=%s, seq=%d (当前last_seq=%d)", task_id, chunk.seq, last_seq)
-                continue
-
-            # 更新 last_seq 并下发
-            last_seq = chunk.seq
-            _log_chunk(task_id, chunk, "推送")
-            yield ServerSentEvent(data=chunk.model_dump_json())
-
-            # 收到结束信号
-            if chunk.is_done:
-                logger.info("收到完成信号，关闭SSE: task_id=%s", task_id)
-                yield ServerSentEvent(data="[DONE]")
-                break
+            idle_started_at = time.monotonic()
+            for event in events:
+                redis_last_id = event.id
+                _log_event(task_id, event, "推送")
+                yield _to_sse(event)
+                if event.event in {StreamEventType.DONE, StreamEventType.ERROR}:
+                    logger.info("收到终态事件，关闭SSE: task_id=%s", task_id)
+                    return
 
     except asyncio.CancelledError:
-        # 客户端（前端或网关）主动断开连接
         logger.info("SSE连接被客户端主动断开: task_id=%s", task_id)
     except Exception:
         logger.exception("SSE流处理异常: task_id=%s", task_id)
-    finally:
-        # 确保资源释放，无论发生什么情况都退订
-        if pubsub is not None:
-            await stream_service.unsubscribe_channel(pubsub, task_id)
-            logger.debug("PubSub退订成功: task_id=%s", task_id)
 
 
-# async def _event_generator(task_id: str, stream_service: StreamService):
-#     """SSE事件生成器：历史回放 + 实时订阅 + seq去重，直接透传OpenAI格式"""
-#     last_seq = -1
-
-#     # Step 1: 从Redis List回放历史Chunk
-#     try:
-#         history = await stream_service.replay_history(task_id)
-#         logger.info("历史回放: task_id=%s, chunks=%d", task_id, len(history))
-#         for chunk in history:
-#             last_seq = max(last_seq, chunk.seq)
-#             _log_chunk(task_id, chunk, "回放")
-#             yield ServerSentEvent(data=chunk.model_dump_json())
-#     except Exception:
-#         logger.exception("回放历史Chunk失败: task_id=%s", task_id)
-
-#     # 如果历史中已包含完成信号，发送[DONE]并结束
-#     if history and any(c.is_done for c in history):
-#         logger.info("历史中已包含完成信号，关闭SSE: task_id=%s", task_id)
-#         yield ServerSentEvent(data="[DONE]")
-#         return
-
-#     # Step 2: 订阅Redis PubSub接收增量Chunk
-#     pubsub = None
-#     try:
-#         pubsub = await stream_service.subscribe_channel(task_id)
-#         async for message in pubsub.listen():
-#             if message["type"] != "message":
-#                 continue
-
-#             raw_data = message["data"]
-#             if isinstance(raw_data, bytes):
-#                 raw_data = raw_data.decode("utf-8")
-
-#             try:
-#                 chunk = ChatCompletionChunk.model_validate_json(raw_data)
-#             except Exception:
-#                 logger.exception("反序列化PubSub消息失败: %s", raw_data)
-#                 continue
-
-#             # 基于seq去重：跳过已在历史中回放过的Chunk
-#             if chunk.seq <= last_seq:
-#                 logger.debug("SSE去重跳过: task_id=%s, seq=%d", task_id, chunk.seq)
-#                 continue
-
-#             _log_chunk(task_id, chunk, "推送")
-#             yield ServerSentEvent(data=chunk.model_dump_json())
-
-#             if chunk.is_done:
-#                 logger.info("收到完成信号，关闭SSE: task_id=%s", task_id)
-#                 yield ServerSentEvent(data="[DONE]")
-#                 break
-
-#     except asyncio.CancelledError:
-#         logger.info("SSE连接被客户端断开: task_id=%s", task_id)
-#     except Exception:
-#         logger.exception("PubSub订阅异常: task_id=%s", task_id)
-#     finally:
-#         if pubsub is not None:
-#             await stream_service.unsubscribe_channel(pubsub, task_id)
+def _to_sse(event: StreamEvent) -> ServerSentEvent:
+    return ServerSentEvent(
+        id=event.id,
+        event=event.event.value,
+        data=stream_event_payload(event),
+    )
 
 
-def _log_chunk(task_id: str, chunk: ChatCompletionChunk, phase: str) -> None:
-    content = chunk.delta_content
+def _log_event(task_id: str, event: StreamEvent, phase: str) -> None:
     logger.debug(
-        "SSE%s: task_id=%s, seq=%d, finish_reason=%s, content=%s",
+        "SSE%s: task_id=%s, id=%s, event=%s, seq=%d",
         phase,
         task_id,
-        chunk.seq,
-        chunk.choices[0].finish_reason,
-        content[:100] if content else "",
+        event.id,
+        event.event,
+        event.seq,
     )

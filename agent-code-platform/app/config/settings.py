@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     kafka_topic: str = "agent-generation-tasks"
     kafka_consumer_group: str = "agent-code-platform-worker"
     kafka_result_topic: str = "task-result-topic"
+    kafka_max_poll_interval_ms: int = 1_800_000
+    kafka_poll_timeout_ms: int = 1_000
+    kafka_poll_max_records: int = 1
 
     # ==================== Redis 配置 ====================
     redis_host: str = "localhost"
@@ -83,6 +86,13 @@ class Settings(BaseSettings):
     redis_password: str = ""
     redis_db: int = 0
     redis_task_history_ttl: int = 3600  # 任务历史过期时间（秒），默认1小时
+    redis_stream_max_len: int = 10_000
+    redis_stream_block_ms: int = 15_000
+    redis_sse_idle_timeout_sec: int = 180
+    redis_lock_ttl_sec: int = 300
+    redis_lock_renew_interval_sec: int = 30
+    generation_timeout_sec: int = 900
+    generation_retry_attempts: int = 0
 
     # ==================== JWT 配置 ====================
     # Base64编码的密钥，必须与Java后端 jwt.secret 保持一致

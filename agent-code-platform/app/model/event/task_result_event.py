@@ -6,9 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class TaskStatus(str, Enum):
     """任务状态"""
 
-    STREAMING = "STREAMING"
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+    WAITING_RETRY = "WAITING_RETRY"
+    CANCELLED = "CANCELLED"
+    STREAMING = "STREAMING"
     INTERRUPTED = "INTERRUPTED"
 
 

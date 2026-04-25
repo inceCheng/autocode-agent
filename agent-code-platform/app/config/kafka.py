@@ -19,6 +19,7 @@ async def init_kafka_consumer(settings: Settings) -> None:
         group_id=settings.kafka_consumer_group,
         auto_offset_reset="earliest",
         enable_auto_commit=False,
+        max_poll_interval_ms=settings.kafka_max_poll_interval_ms,
         key_deserializer=lambda k: k.decode("utf-8") if k else None,
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
     )

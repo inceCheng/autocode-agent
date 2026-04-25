@@ -25,8 +25,10 @@ def create_file_tools(project_dir: Path) -> list:
     def _safe_resolve(path: str) -> Path:
         """解析相对路径并确保不越界到项目目录之外。"""
         resolved = (_root / path).resolve()
-        if not str(resolved).startswith(str(_root)):
-            raise ValueError(f"路径越界，禁止访问项目目录之外的文件: {path}")
+        try:
+            resolved.relative_to(_root)
+        except ValueError:
+            raise ValueError(f"路径越界，禁止访问项目目录之外的文件: {path}") from None
         return resolved
 
     @tool

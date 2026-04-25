@@ -12,6 +12,7 @@ from langchain_openai import ChatOpenAI
 
 from app.config.settings import get_settings
 from app.model.response.html_response import HtmlGenResponse
+from app.tools.path_utils import build_code_output_dir, build_code_output_url
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class HtmlGenService:
         )
         return prompt_template | self._llm
 
-    def _build_output_path(self, app_id: int,preview:str) -> Path:
+    def _build_output_path(self, app_id: int, preview: str) -> tuple[Path, str]:
         """
         构建输出路径：{CODE_OUTPUT_ROOT_DIR}/{previewPath}/html_{appId}/
 
@@ -153,11 +154,19 @@ class HtmlGenService:
             输出目录的 Path 对象
         """
         settings = get_settings()
-        output_dir = Path(settings.code_output_root_dir) / preview / f"html_{app_id}"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        return output_dir
+        return build_code_output_dir(
+            settings.code_output_root_dir,
+            preview,
+            f"html_{app_id}",
+        )
 
-    async def _save_html_file(self, html_content: str, filename: str, app_id: int,preview_path:str) -> Path:
+    async def _save_html_file(
+        self,
+        html_content: str,
+        filename: str,
+        app_id: int,
+        preview_path: str,
+    ) -> Path:
         """
         将纯HTML内容异步写入本地文件。
 
@@ -171,7 +180,7 @@ class HtmlGenService:
         Returns:
             写入文件的完整 Path 对象
         """
-        output_dir = self._build_output_path(app_id,preview_path)
+        output_dir, _ = self._build_output_path(app_id,preview_path)
         file_path = output_dir/filename
         try:
             async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:
@@ -220,13 +229,18 @@ class HtmlGenService:
 
         # Step 4: 生成唯一文件名并异步保存到本地
         filename = self._generate_filename()
-        saved_path = await self._save_html_file(html_content, filename, app_id)
+        settings = get_settings()
+        saved_path = await self._save_html_file(
+            html_content,
+            filename,
+            app_id,
+            settings.preview_path,
+        )
 
         # Step 5: 构建响应（绝对路径 + URL访问路径）
         # 新路径格式: /static/output/{preview_path}/html_{appId}/{filename}
-        settings = get_settings()
-        preview = settings.preview_path.lstrip("/")
-        url_path = f"/static/output/{preview}/html_{app_id}/{filename}"
+        _, preview = self._build_output_path(app_id, settings.preview_path)
+        url_path = build_code_output_url(preview, f"html_{app_id}", filename)
         return HtmlGenResponse(
             filename=filename,
             file_path=str(saved_path.resolve()),

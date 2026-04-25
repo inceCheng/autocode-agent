@@ -1,5 +1,6 @@
 package com.chg.yuaicodemother.kafka;
 
+import com.chg.yuaicodemother.model.service.AiGenerationTaskService;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -53,6 +55,14 @@ public class TaskResultConsumer {
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private AiGenerationTaskService aiGenerationTaskService;
+
+    /**
+     * 缓存最近一次更新的任务状态，避免重复写入相同状态
+     */
+    private final ConcurrentHashMap<String, String> lastKnownStatus = new ConcurrentHashMap<>();
 
     /**
      * 消费 task-result-topic 消息。
@@ -99,6 +109,9 @@ public class TaskResultConsumer {
             // 4. 加入缓冲队列
             buffer.offer(event);
             log.debug("消息入队, taskId={}, seq={}, bufferSize={}", event.getTaskId(), event.getSeq(), buffer.size());
+
+            // 4.5 更新 ai_generation_task 任务状态（仅状态变更时写库）
+            updateTaskStatus(event);
 
             // 5. 缓冲区达到阈值立即刷盘
             if (buffer.size() >= BUFFER_FLUSH_THRESHOLD) {
@@ -150,6 +163,31 @@ public class TaskResultConsumer {
             // 当前策略：记录错误日志，依赖监控告警
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * 更新 ai_generation_task 表中的任务状态。
+     * 使用本地缓存跳过相同状态的重复写入，仅在状态发生变更时才写库。
+     */
+    private void updateTaskStatus(TaskResultEvent event) {
+        String taskId = event.getTaskId();
+        String newStatus = event.getStatus();
+        Long appId = event.getAppId();
+        Long userId = event.getUserId();
+
+        // 状态未变更则跳过
+        String previousStatus = lastKnownStatus.put(taskId, newStatus);
+        if (newStatus.equals(previousStatus)) {
+            return;
+        }
+
+        try {
+            aiGenerationTaskService.updateTaskStatus(taskId, appId, userId, newStatus, event.getErrorMsg());
+            log.debug("任务状态已更新, taskId={}, status={}", taskId, newStatus);
+        } catch (Exception e) {
+            log.error("更新任务状态失败, taskId={}, status={}", taskId, newStatus, e);
+            // 更新失败不影响对话历史落库，仅记录日志
         }
     }
 }

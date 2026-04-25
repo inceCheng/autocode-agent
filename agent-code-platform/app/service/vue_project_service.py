@@ -16,6 +16,7 @@ from langgraph.prebuilt import create_react_agent
 from app.config.settings import get_settings
 from app.model.response.stream_response import FileMeta
 from app.tools.file_tools import create_file_tools
+from app.tools.path_utils import build_code_output_dir, build_code_output_url
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,11 @@ class VueProjectGenService:
             项目目录的 Path 对象
         """
         settings = get_settings()
-        project_dir = Path(settings.code_output_root_dir) / preview / f"vue_project_{app_id}"
-        project_dir.mkdir(parents=True, exist_ok=True)
+        project_dir, _ = build_code_output_dir(
+            settings.code_output_root_dir,
+            preview,
+            f"vue_project_{app_id}",
+        )
         return project_dir
 
     async def _read_system_prompt(self) -> str:
@@ -212,7 +216,11 @@ class VueProjectGenService:
                 )
 
     @staticmethod
-    def scan_project_files(project_dir: Path, app_id: int, preview: str) -> list[FileMeta]:
+    def scan_project_files(
+        project_dir: Path,
+        app_id: int,
+        preview: str,
+    ) -> list[FileMeta]:
         """扫描项目目录，返回所有文件的元信息列表。
 
         Args:
@@ -223,13 +231,19 @@ class VueProjectGenService:
             FileMeta 列表
         """
         result: list[FileMeta] = []
-        settings = get_settings()
-        # 新路径格式: /static/output/{preview_path}/vue_project_{appId}/{file}
-        base_url_prefix = f"/static/output/{preview}/vue_project_{app_id}"
+        _, safe_preview = build_code_output_dir(
+            get_settings().code_output_root_dir,
+            preview,
+            f"vue_project_{app_id}",
+        )
         for file_path in sorted(project_dir.rglob("*")):
             if file_path.is_file():
                 rel_path = file_path.relative_to(project_dir)
-                url_path = f"{base_url_prefix}/{rel_path}"
+                url_path = build_code_output_url(
+                    safe_preview,
+                    f"vue_project_{app_id}",
+                    str(rel_path),
+                )
                 result.append(
                     FileMeta(
                         filename=str(rel_path),
