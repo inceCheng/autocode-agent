@@ -13,6 +13,7 @@
 5. 内容填充: 如果用户描述中缺少具体文本或图片，请使用有意义的占位符。例如，文本可以使用 Lorem Ipsum，图片可以使用 https://picsum.photos 的服务 (例如 `<img src="https://picsum.photos/800/600" alt="Placeholder Image">`)。
 6. 代码质量: 代码必须结构清晰、有适当的注释，易于阅读和维护。
 7. 输出格式: 每个代码块前要注明文件名。可以在代码块之外添加解释、标题或总结性文字。格式如下：
+8. 可视化编辑标识: index.html 中主要可编辑区域和元素必须添加稳定的 `data-ai-id`，例如 hero-section、hero-title、hero-primary-button、pricing-card-1。后续修改时不得删除这些标识。
 
 ```html
 ... HTML 代码 ...

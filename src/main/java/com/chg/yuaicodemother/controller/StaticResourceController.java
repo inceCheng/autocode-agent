@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 @RestController
 @RequestMapping("/static")
@@ -28,7 +30,7 @@ public class StaticResourceController {
      * 访问格式：http://localhost:8123/api/static/{deployKey}[/{fileName}]
      */
     @GetMapping("/{deployKey}/**")
-    public ResponseEntity<Resource> serveStaticResource(
+    public ResponseEntity<?> serveStaticResource(
             @PathVariable String deployKey,
             HttpServletRequest request) {
         try {
@@ -52,6 +54,12 @@ public class StaticResourceController {
             if (!file.exists()) {
                 return ResponseEntity.notFound().build();
             }
+            if (isHtml(filePath) && "1".equals(request.getParameter("visualEdit"))) {
+                String html = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+                return ResponseEntity.ok()
+                        .header("Content-Type", getContentTypeWithCharset(filePath))
+                        .body(injectVisualEditBridge(html));
+            }
             // 返回文件资源
             Resource resource = new FileSystemResource(file);
             return ResponseEntity.ok()
@@ -72,5 +80,144 @@ public class StaticResourceController {
         if (filePath.endsWith(".png")) return "image/png";
         if (filePath.endsWith(".jpg")) return "image/jpeg";
         return "application/octet-stream";
+    }
+
+    private boolean isHtml(String filePath) {
+        return filePath.endsWith(".html");
+    }
+
+    private String injectVisualEditBridge(String html) {
+        if (html.contains("id=\"ai-visual-edit-bridge\"")) {
+            return html;
+        }
+        String bridge = """
+                <script id="ai-visual-edit-bridge">
+                (function () {
+                  if (window.__AI_VISUAL_EDIT_BRIDGE__) return;
+                  window.__AI_VISUAL_EDIT_BRIDGE__ = true;
+                  var enabled = false;
+                  var hoverEl = null;
+                  var selectedEl = null;
+                  var parentOrigin = '*';
+
+                  function ensureStyle() {
+                    if (document.getElementById('ai-visual-edit-style')) return;
+                    var style = document.createElement('style');
+                    style.id = 'ai-visual-edit-style';
+                    style.textContent = '.ai-edit-hover{outline:2px dashed #1677ff!important;outline-offset:2px!important;cursor:crosshair!important}.ai-edit-selected{outline:3px solid #52c41a!important;outline-offset:2px!important}';
+                    document.head.appendChild(style);
+                  }
+
+                  function classNameOf(el) {
+                    if (!el.className) return '';
+                    return typeof el.className === 'string' ? el.className : (el.className.baseVal || '');
+                  }
+
+                  function selectorOf(el) {
+                    if (el.getAttribute('data-ai-id')) return '[data-ai-id=\"' + el.getAttribute('data-ai-id') + '\"]';
+                    var path = [];
+                    var cur = el;
+                    while (cur && cur !== document.body && cur.nodeType === 1) {
+                      var selector = cur.tagName.toLowerCase();
+                      if (cur.id) {
+                        selector += '#' + cur.id;
+                        path.unshift(selector);
+                        break;
+                      }
+                      var cls = classNameOf(cur).split(/\\s+/).filter(function (c) { return c && c.indexOf('ai-edit-') !== 0; });
+                      if (cls.length) selector += '.' + cls.join('.');
+                      var siblings = Array.prototype.slice.call(cur.parentElement ? cur.parentElement.children : []);
+                      selector += ':nth-child(' + (siblings.indexOf(cur) + 1) + ')';
+                      path.unshift(selector);
+                      cur = cur.parentElement;
+                    }
+                    return path.join(' > ');
+                  }
+
+                  function infoOf(el) {
+                    var rect = el.getBoundingClientRect();
+                    var style = window.getComputedStyle(el);
+                    return {
+                      nodeId: el.getAttribute('data-ai-id') || '',
+                      tagName: el.tagName,
+                      id: el.id || '',
+                      className: classNameOf(el),
+                      text: (el.textContent || '').trim().slice(0, 200),
+                      textContent: (el.textContent || '').trim().slice(0, 200),
+                      selector: selectorOf(el),
+                      outerHTML: (el.outerHTML || '').slice(0, 5000),
+                      pagePath: window.location.search + window.location.hash,
+                      computedStyle: {
+                        color: style.color,
+                        backgroundColor: style.backgroundColor,
+                        fontSize: style.fontSize,
+                        fontWeight: style.fontWeight,
+                        borderRadius: style.borderRadius,
+                        display: style.display
+                      },
+                      rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+                    };
+                  }
+
+                  function clearHover() {
+                    if (hoverEl) hoverEl.classList.remove('ai-edit-hover');
+                    hoverEl = null;
+                  }
+
+                  function clearSelected() {
+                    if (selectedEl) selectedEl.classList.remove('ai-edit-selected');
+                    selectedEl = null;
+                  }
+
+                  document.addEventListener('mouseover', function (event) {
+                    if (!enabled) return;
+                    var target = event.target;
+                    if (!target || target === document.body || target === document.documentElement || target === selectedEl) return;
+                    clearHover();
+                    target.classList.add('ai-edit-hover');
+                    hoverEl = target;
+                  }, true);
+
+                  document.addEventListener('mouseout', function () {
+                    if (enabled) clearHover();
+                  }, true);
+
+                  document.addEventListener('click', function (event) {
+                    if (!enabled) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var target = event.target;
+                    if (!target || target === document.body || target === document.documentElement) return;
+                    clearHover();
+                    clearSelected();
+                    target.classList.add('ai-edit-selected');
+                    selectedEl = target;
+                    window.parent.postMessage({ type: 'AI_ELEMENT_SELECTED', data: { elementInfo: infoOf(target) } }, parentOrigin);
+                  }, true);
+
+                  window.addEventListener('message', function (event) {
+                    var data = event.data || {};
+                    if (data.type !== 'AI_VISUAL_EDIT_MODE' && data.type !== 'AI_VISUAL_EDIT_CLEAR') return;
+                    parentOrigin = event.origin || '*';
+                    if (data.type === 'AI_VISUAL_EDIT_CLEAR') {
+                      clearHover();
+                      clearSelected();
+                      return;
+                    }
+                    enabled = !!data.enabled;
+                    ensureStyle();
+                    if (!enabled) {
+                      clearHover();
+                      clearSelected();
+                    }
+                  });
+                })();
+                </script>
+                """;
+        int bodyIndex = html.toLowerCase().lastIndexOf("</body>");
+        if (bodyIndex >= 0) {
+            return html.substring(0, bodyIndex) + bridge + html.substring(bodyIndex);
+        }
+        return html + bridge;
     }
 }

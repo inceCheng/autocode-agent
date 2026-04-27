@@ -63,6 +63,26 @@ public class AppVO implements Serializable {
     private String previewPath;
 
     /**
+     * 当前成功版本 id
+     */
+    private Long currentVersionId;
+
+    /**
+     * 当前执行中的任务 id
+     */
+    private String currentTaskId;
+
+    /**
+     * 当前生成/编辑状态快照
+     */
+    private String generateStatus;
+
+    /**
+     * 当前成功版本
+     */
+    private AppVersionVO currentVersion;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

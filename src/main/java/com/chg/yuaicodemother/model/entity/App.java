@@ -86,6 +86,15 @@ public class App implements Serializable {
     @Column("previewPath")
     private String previewPath;
 
+    @Column("currentVersionId")
+    private Long currentVersionId;
+
+    @Column("currentTaskId")
+    private String currentTaskId;
+
+    @Column("generateStatus")
+    private String generateStatus;
+
     /**
      * 编辑时间
      */

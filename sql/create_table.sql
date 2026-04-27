@@ -31,6 +31,9 @@ create table app
     codeGenType  varchar(64)                        null comment '代码生成类型（枚举）',
     deployKey    varchar(64)                        null comment '部署标识',
     deployedTime datetime                           null comment '部署时间',
+    currentVersionId bigint                         null comment '当前成功版本 id',
+    currentTaskId varchar(64)                       null comment '当前执行中的任务 id',
+    generateStatus varchar(32)                      null comment '当前生成/编辑状态快照',
     priority     int      default 0                 not null comment '优先级',
     userId       bigint                             not null comment '创建用户id',
     editTime     datetime default CURRENT_TIMESTAMP not null comment '编辑时间',
@@ -97,3 +100,41 @@ create table ai_generation_task (
                                     index idx_user_id (userId),
                                     index idx_status_updated_at (status, updatedAt)
 );
+
+-- 添加字段
+ALTER TABLE ai_generation_task
+    ADD COLUMN taskType VARCHAR(32) NOT NULL DEFAULT 'GENERATE',
+    ADD COLUMN baseVersionId BIGINT NULL,
+    ADD COLUMN targetVersionId BIGINT NULL;
+
+-- 添加索引
+CREATE INDEX idx_app_status ON ai_generation_task (appId, status);
+
+
+create table if not exists app_version
+(
+    id              bigint auto_increment comment 'id' primary key,
+    appId           bigint                             not null comment '应用 id',
+    parentVersionId bigint                             null comment '父版本 id',
+    versionNo       int                                not null comment '版本号，从 1 开始',
+    taskId          varchar(64)                        not null comment '创建该版本的任务 id',
+    codeGenType     varchar(64)                        not null comment '代码生成类型',
+    sourcePath      varchar(512)                       not null comment '相对 CODE_OUTPUT_ROOT_DIR 的源码目录',
+    manifestPath    varchar(512)                       null comment '元素 manifest 相对路径',
+    previewUrl      varchar(1024)                      null comment '相对 Java API 的预览 URL',
+    status          varchar(32)                        not null comment 'PENDING/SUCCESS/FAILED',
+    createTime      datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime      datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete        tinyint  default 0                 not null comment '是否删除',
+    UNIQUE KEY uk_taskId (taskId),
+    UNIQUE KEY uk_app_version_no (appId, versionNo),
+    INDEX idx_app_id (appId),
+    INDEX idx_parent_version_id (parentVersionId)
+) comment '应用代码版本' collate = utf8mb4_unicode_ci;
+
+
+-- 添加字段并添加注释
+ALTER TABLE app
+    ADD COLUMN currentVersionId BIGINT NULL COMMENT '当前成功版本 id',
+    ADD COLUMN currentTaskId VARCHAR(64) NULL COMMENT '当前执行中的任务 id',
+    ADD COLUMN generateStatus VARCHAR(32) NULL COMMENT '当前生成/编辑状态快照';

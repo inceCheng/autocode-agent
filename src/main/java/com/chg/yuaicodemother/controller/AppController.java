@@ -18,6 +18,7 @@ import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.UserService;
 import com.chg.yuaicodemother.model.service.impl.ProjectDownloadService;
 import com.chg.yuaicodemother.model.vo.AppVO;
+import com.chg.yuaicodemother.model.vo.AppVersionVO;
 import com.chg.yuaicodemother.ratelimiter.annotation.RateLimit;
 import com.chg.yuaicodemother.ratelimiter.enums.RateLimitType;
 import com.mybatisflex.core.paginate.Page;
@@ -63,36 +64,36 @@ public class AppController {
      * @param request 请求对象
      * @return 生成结果流
      */
-    @GetMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "请求过于频繁，请稍后再试")
-    public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
-                                                       @RequestParam String message,
-                                                       HttpServletRequest request) {
-        // 参数校验
-        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 无效");
-        ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "用户消息不能为空");
-        // 获取当前登录用户
-        User loginUser = userService.getLoginUser(request);
-        // 调用服务生成代码（流式）
-        Flux<String> contentFlux = appService.chatToGenCode(appId, message, loginUser);
-        // 转换为 ServerSentEvent 格式
-        return contentFlux
-                .map(chunk -> {
-                    // 将内容包装成 JSON 对象
-                    Map<String, String> wrapper = Map.of("d", chunk);
-                    String jsonData = JSONUtil.toJsonStr(wrapper);
-                    return ServerSentEvent.<String>builder()
-                            .data(jsonData)
-                            .build();
-                })
-                .concatWith(Mono.just(
-                        // 发送结束事件
-                        ServerSentEvent.<String>builder()
-                                .event("done")
-                                .data("")
-                                .build()
-                ));
-    }
+    // @GetMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    // @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "请求过于频繁，请稍后再试")
+    // public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
+    //                                                    @RequestParam String message,
+    //                                                    HttpServletRequest request) {
+    //     // 参数校验
+    //     ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 无效");
+    //     ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "用户消息不能为空");
+    //     // 获取当前登录用户
+    //     User loginUser = userService.getLoginUser(request);
+    //     // 调用服务生成代码（流式）
+    //     Flux<String> contentFlux = appService.chatToGenCode(appId, message, loginUser);
+    //     // 转换为 ServerSentEvent 格式
+    //     return contentFlux
+    //             .map(chunk -> {
+    //                 // 将内容包装成 JSON 对象
+    //                 Map<String, String> wrapper = Map.of("d", chunk);
+    //                 String jsonData = JSONUtil.toJsonStr(wrapper);
+    //                 return ServerSentEvent.<String>builder()
+    //                         .data(jsonData)
+    //                         .build();
+    //             })
+    //             .concatWith(Mono.just(
+    //                     // 发送结束事件
+    //                     ServerSentEvent.<String>builder()
+    //                             .event("done")
+    //                             .data("")
+    //                             .build()
+    //             ));
+    // }
 
 
     /**
@@ -108,6 +109,36 @@ public class AppController {
         User loginUser = userService.getLoginUser(request);
         AppAddResponse response = appService.createApp(appAddRequest, loginUser);
         return ResultUtils.success(response);
+    }
+
+    /**
+     * 创建定点修改任务。
+     */
+    @PostMapping("/edit/create")
+    public BaseResponse<AppEditCreateResponse> createEditTask(@RequestBody AppEditCreateRequest appEditCreateRequest,
+                                                              HttpServletRequest request) {
+        ThrowUtils.throwIf(appEditCreateRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        AppEditCreateResponse response = appService.createEditTask(appEditCreateRequest, loginUser);
+        return ResultUtils.success(response);
+    }
+
+    /**
+     * 获取当前成功版本。
+     */
+    @GetMapping("/version/current")
+    public BaseResponse<AppVersionVO> getCurrentVersion(Long appId, HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(appService.getCurrentVersionVO(appId, loginUser));
+    }
+
+    /**
+     * 获取应用版本列表。
+     */
+    @GetMapping("/version/list")
+    public BaseResponse<List<AppVersionVO>> listVersions(Long appId, HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(appService.listVersionVO(appId, loginUser));
     }
 
     /**
@@ -367,14 +398,18 @@ public class AppController {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限下载该应用代码");
         }
         // 4. 构建应用代码目录路径（生成目录，非部署目录）
-        LocalDate now = LocalDate.now();
-        // 格式化日期为 year/month/day
-        String datePath = String.format("%d/%02d/%02d",
-                now.getYear(),
-                now.getMonthValue(),
-                now.getDayOfMonth());
-        // 相对路径处理，创建基于 appId 的项目目录
-        String sourceDirPath = String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, datePath, CodeGenTypeEnum.VUE_PROJECT, appId);
+        AppVersionVO currentVersion = appService.getCurrentVersionVO(appId, loginUser);
+        String sourceDirPath;
+        if (currentVersion != null && StrUtil.isNotBlank(currentVersion.getSourcePath())) {
+            sourceDirPath = String.format("%s/%s", AppConstant.CODE_OUTPUT_ROOT_DIR, currentVersion.getSourcePath());
+        } else {
+            LocalDate now = LocalDate.now();
+            String datePath = String.format("%d/%02d/%02d",
+                    now.getYear(),
+                    now.getMonthValue(),
+                    now.getDayOfMonth());
+            sourceDirPath = String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, datePath, app.getCodeGenType(), appId);
+        }
         // 5. 检查代码目录是否存在
         File sourceDir = new File(sourceDirPath);
         ThrowUtils.throwIf(!sourceDir.exists() || !sourceDir.isDirectory(),

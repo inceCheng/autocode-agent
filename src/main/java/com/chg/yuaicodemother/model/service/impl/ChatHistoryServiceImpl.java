@@ -8,9 +8,11 @@ import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.exception.ThrowUtils;
 import com.chg.yuaicodemother.kafka.TaskResultEvent;
 import com.chg.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
+import com.chg.yuaicodemother.model.entity.AiGenerationTask;
 import com.chg.yuaicodemother.model.entity.App;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
+import com.chg.yuaicodemother.model.service.AiGenerationTaskService;
 import com.chg.yuaicodemother.model.service.AppService;
 import com.chg.yuaicodemother.utils.ContentFormatUtil;
 import com.mybatisflex.core.paginate.Page;
@@ -27,10 +29,15 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.time.LocalDateTime;
+import java.util.Map;
+
+import static com.chg.yuaicodemother.constant.AiGenerationTaskConstant.PROCESSING;
 
 /**
  * 对话历史 服务层实现。
@@ -44,6 +51,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Resource
     @Lazy
     private AppService appService;
+
+    @Resource
+    private AiGenerationTaskService aiGenerationTaskService;
 
     // 消息最大长度限制（longtext 最大支持 4GB，这里限制为 50MB 防止内存问题）
     private static final int MAX_MESSAGE_LENGTH = 50 * 1024 * 1024;
@@ -185,24 +195,76 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void batchInsertChatHistory(List<TaskResultEvent> events) {
         if (CollUtil.isEmpty(events)) {
             return;
         }
         List<ChatHistory> chatHistoryList = new ArrayList<>(events.size());
+        List<AiGenerationTask> taskList = new ArrayList<>();
+
+        // App 状态更新按 appId 去重，避免同一个 appId 被重复更新
+        Map<Long, App> processingAppMap = new LinkedHashMap<>();
+
         for (TaskResultEvent event : events) {
-            String formattedContent = ContentFormatUtil.format(event.getContent());
-            ChatHistory chatHistory = ChatHistory.builder()
-                    .appId(event.getAppId())
-                    .message(formattedContent)
-                    .messageType(event.getMessageType())
-                    .userId(event.getUserId())
-                    .build();
-            chatHistoryList.add(chatHistory);
+            if (PROCESSING.equals(event.getStatus())) {
+                Long appId = event.getAppId();
+
+                processingAppMap.putIfAbsent(
+                        appId,
+                        App.builder()
+                                .id(appId)
+                                .generateStatus(PROCESSING)
+                                .build()
+                );
+
+                taskList.add(
+                        AiGenerationTask.builder()
+                                .appId(appId)
+                                .status(PROCESSING)
+                                .build()
+                );
+
+                // PROCESSING 分支只处理状态和任务，不添加对话历史
+                continue;
+            }
+
+            // 非 PROCESSING 状态才添加对话历史
+            chatHistoryList.add(
+                    ChatHistory.builder()
+                            .appId(event.getAppId())
+                            .message(ContentFormatUtil.format(event.getContent()))
+                            .messageType(event.getMessageType())
+                            .userId(event.getUserId())
+                            .build()
+            );
         }
-        boolean success = this.saveBatch(chatHistoryList);
-        if (!success) {
-            log.error("批量插入对话历史失败，共 {} 条", chatHistoryList.size());
+
+        if (!processingAppMap.isEmpty()) {
+            List<App> processingAppList = new ArrayList<>(processingAppMap.values());
+
+            boolean appUpdated = appService.updateBatch(processingAppList);
+            if (!appUpdated) {
+                throw new IllegalStateException(
+                        String.format("批量更新 App 生成状态失败，共 %d 条", processingAppList.size())
+                );
+            }
+
+            boolean taskSaved = aiGenerationTaskService.updateBatch(taskList);
+            if (!taskSaved) {
+                throw new IllegalStateException(
+                        String.format("批量保存 AI 生成任务失败，共 %d 条", taskList.size())
+                );
+            }
+        }
+
+        if (!chatHistoryList.isEmpty()) {
+            boolean historySaved = this.saveBatch(chatHistoryList);
+            if (!historySaved) {
+                throw new IllegalStateException(
+                        String.format("批量插入对话历史失败，共 %d 条", chatHistoryList.size())
+                );
+            }
         }
     }
 

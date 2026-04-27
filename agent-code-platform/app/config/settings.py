@@ -4,7 +4,7 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-''' 从环境变量.env 文件中读取配置，并做缓存复用 '''
+# 从环境变量 .env 文件中读取配置，并做缓存复用
 class Settings(BaseSettings):
     # ==================== 应用基础配置 ====================
     app_name: str = "ai-agent-assistant-platform"
@@ -51,7 +51,9 @@ class Settings(BaseSettings):
     # 生成的多文件项目保存目录
     multi_file_output_dir: str = "./output/multi_file"
     # 系统提示词文件路径
-    multi_file_system_prompt_path: str = "app/prompts/codegen-multi-file-system-prompt.txt"
+    multi_file_system_prompt_path: str = (
+        "app/prompts/codegen-multi-file-system-prompt.txt"
+    )
 
     # ==================== Vue工程项目生成模型配置 ====================
     # 大模型API密钥（默认复用HTML生成密钥）
@@ -67,12 +69,21 @@ class Settings(BaseSettings):
     # 生成的Vue工程项目保存目录
     vue_project_output_dir: str = "./output/vue_project"
     # 系统提示词文件路径
-    vue_project_system_prompt_path: str = "app/prompts/codegen-vue-project-system-prompt.txt"
+    vue_project_system_prompt_path: str = (
+        "app/prompts/codegen-vue-project-system-prompt.txt"
+    )
     # 静态文件URL前缀（与main.py中挂载路径保持一致）
     vue_project_base_url_prefix: str = "/static/vue_project"
 
+    # ==================== 定点修改模型配置 ====================
+    edit_codegen_api_key: SecretStr | None = None
+    edit_codegen_base_url: str = "https://api.minimaxi.com/v1"
+    edit_codegen_model_name: str = "MiniMax-M2.7"
+    edit_codegen_temperature: float = 0.2
+    edit_build_timeout_sec: int = 180
+
     # ==================== Kafka 配置 ====================
-    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_bootstrap_servers: str = "10.23.16.54:9092"
     kafka_topic: str = "agent-generation-tasks"
     kafka_consumer_group: str = "agent-code-platform-worker"
     kafka_result_topic: str = "task-result-topic"
@@ -81,7 +92,7 @@ class Settings(BaseSettings):
     kafka_poll_max_records: int = 1
 
     # ==================== Redis 配置 ====================
-    redis_host: str = "localhost"
+    redis_host: str = "10.23.16.54"
     redis_port: int = 6379
     redis_password: str = ""
     redis_db: int = 0
@@ -93,6 +104,15 @@ class Settings(BaseSettings):
     redis_lock_renew_interval_sec: int = 30
     generation_timeout_sec: int = 900
     generation_retry_attempts: int = 0
+
+    # ==================== 对话标题生成模型配置 ====================
+    title_gen_api_key: SecretStr | None = None
+    title_gen_base_url: str = "https://api.minimaxi.com/v1"
+    title_gen_model_name: str = "MiniMax-M2.7"
+    title_gen_temperature: float = 0.1
+    title_gen_system_prompt_path: str = (
+        "app/prompts/title-gen-system-prompt.txt"
+    )
 
     # ==================== JWT 配置 ====================
     # Base64编码的密钥，必须与Java后端 jwt.secret 保持一致

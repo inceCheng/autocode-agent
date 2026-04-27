@@ -24,6 +24,7 @@ from app.config.settings import get_settings
 from app.controller.html_controller import router as html_router
 from app.controller.route_controller import router as route_router
 from app.controller.stream_controller import router as stream_router
+from app.controller.title_controller import router as title_router
 from app.worker.kafka_consumer import kafka_consumer_worker
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(route_router, prefix="/api/ai", tags=["ai"])
     app.include_router(html_router, prefix="/api/ai", tags=["ai"])
     app.include_router(stream_router, prefix="/api/ai", tags=["ai"])
+    app.include_router(title_router, prefix="/api/ai", tags=["ai"])
 
     # ==================== 挂载静态文件服务 ====================
     # 挂载代码输出根目录（上一级目录的 static/output），使生成的文件可通过URL直接访问

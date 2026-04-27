@@ -42,6 +42,15 @@ public class AiGenerationTask implements Serializable {
     @Column("projectType")
     private String projectType;
 
+    @Column("taskType")
+    private String taskType;
+
+    @Column("baseVersionId")
+    private Long baseVersionId;
+
+    @Column("targetVersionId")
+    private Long targetVersionId;
+
     private String status;
 
     @Column("retryCount")

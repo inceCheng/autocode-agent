@@ -29,6 +29,11 @@ public class AppAddResponse implements Serializable {
      */
     private String token;
 
+    /**
+     * 本次任务创建的目标版本 id
+     */
+    private Long targetVersionId;
+
 
     @Serial
     private static final long serialVersionUID = 1L;

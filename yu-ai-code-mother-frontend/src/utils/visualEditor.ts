@@ -3,12 +3,16 @@
  * 负责管理iframe内的可视化编辑功能
  */
 export interface ElementInfo {
+  nodeId?: string
   tagName: string
   id: string
   className: string
+  text?: string
   textContent: string
   selector: string
+  outerHTML?: string
   pagePath: string
+  computedStyle?: Record<string, any>
   rect: {
     top: number
     left: number
@@ -47,6 +51,10 @@ export class VisualEditor {
     }
     this.isEditMode = true
     setTimeout(() => {
+      this.sendMessageToIframe({
+        type: 'AI_VISUAL_EDIT_MODE',
+        enabled: true,
+      })
       this.injectEditScript()
     }, 300)
   }
@@ -57,10 +65,17 @@ export class VisualEditor {
   disableEditMode() {
     this.isEditMode = false
     this.sendMessageToIframe({
+      type: 'AI_VISUAL_EDIT_MODE',
+      enabled: false,
+    })
+    this.sendMessageToIframe({
       type: 'TOGGLE_EDIT_MODE',
       editMode: false,
     })
     // 清除所有编辑状态
+    this.sendMessageToIframe({
+      type: 'AI_VISUAL_EDIT_CLEAR',
+    })
     this.sendMessageToIframe({
       type: 'CLEAR_ALL_EFFECTS',
     })
@@ -126,15 +141,19 @@ export class VisualEditor {
     ) {
       return
     }
-    const { type, data } = payload as { type: string; data?: unknown }
+    if (this.iframe?.contentWindow && event.source !== this.iframe.contentWindow) {
+      return
+    }
+    const { type, data } = payload as { type: string; data?: { elementInfo?: ElementInfo } }
     switch (type) {
+      case 'AI_ELEMENT_SELECTED':
       case 'ELEMENT_SELECTED':
-        if (this.options.onElementSelected && data.elementInfo) {
+        if (this.options.onElementSelected && data?.elementInfo) {
           this.options.onElementSelected(data.elementInfo)
         }
         break
       case 'ELEMENT_HOVER':
-        if (this.options.onElementHover && data.elementInfo) {
+        if (this.options.onElementHover && data?.elementInfo) {
           this.options.onElementHover(data.elementInfo)
         }
         break
@@ -146,7 +165,16 @@ export class VisualEditor {
    */
   private sendMessageToIframe(message: Record<string, any>) {
     if (this.iframe?.contentWindow) {
-      this.iframe.contentWindow.postMessage(message, '*')
+      this.iframe.contentWindow.postMessage(message, this.getIframeOrigin())
+    }
+  }
+
+  private getIframeOrigin() {
+    if (!this.iframe?.src) return '*'
+    try {
+      return new URL(this.iframe.src, window.location.href).origin
+    } catch {
+      return '*'
     }
   }
 

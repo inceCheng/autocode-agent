@@ -212,12 +212,12 @@
           </div>
           <div v-else-if="isAutoDeploying" class="preview-loading">
             <a-spin size="large" />
-            <p style="color: #1890ff; margin-top: 16px">代码生成完毕，正在自动部署网站...</p>
+            <p style="color: #1890ff; margin-top: 16px">任务完成，正在刷新预览...</p>
           </div>
           <iframe
             v-else
-            :key="previewUrl"
-            :src="previewUrl"
+            :key="iframePreviewUrl"
+            :src="iframePreviewUrl"
             class="preview-iframe"
             frameborder="0"
             @load="onIframeLoad"
@@ -260,7 +260,7 @@ import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
-import { CHAT_API_BASE_URL, getStaticPreviewUrl } from '@/config/env'
+import { API_BASE_URL, CHAT_API_BASE_URL, getStaticPreviewUrl } from '@/config/env'
 import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
 import { SettingOutlined, CheckCircleFilled, DownOutlined } from '@ant-design/icons-vue'
 
@@ -278,7 +278,37 @@ const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
 // 应用信息
-const appInfo = ref<API.AppVO>()
+interface AppVersionInfo {
+  id?: string | number
+  previewUrl?: string
+  sourcePath?: string
+  status?: string
+  versionNo?: number
+}
+
+type AppInfoWithVersion = API.AppVO & {
+  currentVersionId?: string | number
+  currentTaskId?: string
+  generateStatus?: string
+  currentVersion?: AppVersionInfo
+}
+
+interface EditTaskResponse {
+  taskId: string
+  appId: string | number
+  token: string
+  baseVersionId?: string | number
+  targetVersionId?: string | number
+  status?: string
+}
+
+interface BaseResponseData<T> {
+  code?: number
+  data?: T
+  message?: string
+}
+
+const appInfo = ref<AppInfoWithVersion>()
 const appId = ref<string>('')
 
 // 对话相关
@@ -304,6 +334,10 @@ const historyLoaded = ref(false)
 // 预览相关
 const previewUrl = ref('')
 const previewReady = ref(false)
+const iframePreviewUrl = computed(() => {
+  if (!previewUrl.value) return ''
+  return isOwner.value ? appendVisualEditParam(previewUrl.value) : previewUrl.value
+})
 
 // 部署相关
 const deploying = ref(false)
@@ -398,6 +432,14 @@ const loadMoreHistory = async () => {
   await loadChatHistory(true)
 }
 
+const refreshAppInfoOnly = async () => {
+  if (!appId.value) return
+  const res = await getAppVoById({ id: appId.value })
+  if (res.data.code === 0 && res.data.data) {
+    appInfo.value = res.data.data as AppInfoWithVersion
+  }
+}
+
 // 获取应用信息
 const fetchAppInfo = async () => {
   const taskId = route.params.id as string
@@ -413,7 +455,7 @@ const fetchAppInfo = async () => {
   try {
     const res = await getAppVoById({ id: realAppId })
     if (res.data.code === 0 && res.data.data) {
-      appInfo.value = res.data.data
+      appInfo.value = res.data.data as AppInfoWithVersion
 
       // 先加载对话历史
       await loadChatHistory()
@@ -435,7 +477,12 @@ const fetchAppInfo = async () => {
             await nextTick()
             scrollToBottom()
             isGenerating.value = true
-            await generateCode(lastMessage.content, aiMessageIndex)
+            await generateCode(aiMessageIndex, {
+              taskId: taskId,
+              token: route.query.token as string,
+              appId: realAppId,
+              autoDeploy: true,
+            })
           }
         }
       }
@@ -468,7 +515,12 @@ const sendInitialMessage = async (prompt: string) => {
   scrollToBottom()
 
   isGenerating.value = true
-  await generateCode(prompt, aiMessageIndex)
+  await generateCode(aiMessageIndex, {
+    taskId: route.params.id as string,
+    token: route.query.token as string,
+    appId: appId.value,
+    autoDeploy: true,
+  })
 }
 
 // 发送消息
@@ -477,25 +529,21 @@ const sendMessage = async () => {
     return
   }
 
-  let message = userInput.value.trim()
-  if (selectedElementInfo.value) {
-    let elementContext = `\n\n选中元素信息：`
-    if (selectedElementInfo.value.pagePath) {
-      elementContext += `\n- 页面路径: ${selectedElementInfo.value.pagePath}`
-    }
-    elementContext += `\n- 标签: ${selectedElementInfo.value.tagName.toLowerCase()}\n- 选择器: ${selectedElementInfo.value.selector}`
-    if (selectedElementInfo.value.textContent) {
-      elementContext += `\n- 当前内容: ${selectedElementInfo.value.textContent.substring(0, 100)}`
-    }
-    message += elementContext
+  const messageText = userInput.value.trim()
+  const baseVersionId = appInfo.value?.currentVersion?.id || appInfo.value?.currentVersionId
+  if (!baseVersionId) {
+    message.warning('请等待当前应用生成完成后再继续修改')
+    return
   }
+
+  const selectedElement = selectedElementInfo.value
   userInput.value = ''
   messages.value.push({
     type: 'user',
-    content: message,
+    content: messageText,
   })
 
-  if (selectedElementInfo.value) {
+  if (selectedElement) {
     clearSelectedElement()
     if (isEditMode.value) {
       toggleEditMode()
@@ -513,11 +561,55 @@ const sendMessage = async () => {
   scrollToBottom()
 
   isGenerating.value = true
-  await generateCode(message, aiMessageIndex)
+  try {
+    const editTask = await createEditTask(messageText, baseVersionId, selectedElement)
+    await generateCode(aiMessageIndex, {
+      taskId: editTask.taskId,
+      token: editTask.token,
+      appId: String(editTask.appId),
+      targetVersionId: editTask.targetVersionId,
+      autoDeploy: false,
+    })
+  } catch (error) {
+    console.error('创建修改任务失败:', error)
+    isGenerating.value = false
+    messages.value[aiMessageIndex].content = '创建修改任务失败，请稍后重试。'
+    messages.value[aiMessageIndex].loading = false
+  }
 }
 
-// 生成代码
-const generateCode = async (_userMessage: string, aiMessageIndex: number) => {
+const createEditTask = async (
+  instruction: string,
+  baseVersionId: string | number,
+  selectedElement: ElementInfo | null,
+) => {
+  const res = await request<BaseResponseData<EditTaskResponse>>({
+    url: '/app/edit/create',
+    method: 'POST',
+    data: {
+      appId: appId.value,
+      baseVersionId,
+      instruction,
+      scope: selectedElement ? 'single' : 'section',
+      selectedElements: selectedElement ? [selectedElement] : [],
+    },
+  })
+  if (res.data.code !== 0 || !res.data.data) {
+    throw new Error(res.data.message || '创建修改任务失败')
+  }
+  return res.data.data
+}
+
+interface StreamTaskOptions {
+  taskId: string
+  token: string
+  appId: string
+  targetVersionId?: string | number
+  autoDeploy?: boolean
+}
+
+// 生成/修改代码流
+const generateCode = async (aiMessageIndex: number, options: StreamTaskOptions) => {
   let streamCompleted = false
 
   contentBuffer = ''
@@ -528,14 +620,11 @@ const generateCode = async (_userMessage: string, aiMessageIndex: number) => {
 
   try {
     const baseURL = CHAT_API_BASE_URL
-    const currentToken = route.query.token as string
-    const taskId = route.params.id as string
-    const appIdStr = route.query.appId as string
 
     const response = await fetch(`${baseURL}/api/ai/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, token: currentToken, app_id: appIdStr }),
+      body: JSON.stringify({ task_id: options.taskId, token: options.token, app_id: options.appId }),
       credentials: 'include',
     })
 
@@ -572,31 +661,16 @@ const generateCode = async (_userMessage: string, aiMessageIndex: number) => {
         if (eventType === 'done' || data === '[DONE]') {
           streamCompleted = true
           isGenerating.value = false
-
-          // 💡 核心修改：移除 setInterval 轮询，替换为立刻自动部署
           isAutoDeploying.value = true
           try {
-            const deployRes = await deployAppApi({
-              appId: appId.value,
-            })
-
-            if (deployRes.data.code === 0 && deployRes.data.data) {
-              // message.success('自动部署成功！')
-              deployUrl.value = deployRes.data.data // 保存链接以供后续使用
-
-              // 部署成功后，重新获取信息并刷新 Iframe
-              await fetchAppInfo()
-              updatePreview()
-            } else {
-              message.error('自动部署失败：' + deployRes.data.message)
-            }
-          } catch (deployError) {
-            console.error('自动部署异常：', deployError)
-            message.error('自动部署异常，请重试')
+            await refreshPreviewAfterTask(options.targetVersionId)
+          } catch (refreshError) {
+            console.error('刷新预览失败：', refreshError)
+            message.error('刷新预览失败，请手动刷新页面')
           } finally {
-            isAutoDeploying.value = false // 结束部署 loading 状态，iframe 此时会显示
+            isAutoDeploying.value = false
           }
-        } else if (eventType === 'business-error') {
+        } else if (eventType === 'business-error' || eventType === 'error') {
           streamCompleted = true
           isGenerating.value = false
           messages.value[aiMessageIndex].content = `❌ 发生错误: ${data}`
@@ -668,8 +742,40 @@ const startTyping = (aiMessageIndex: number) => {
   }, typingSpeed)
 }
 
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+const toAbsolutePreviewUrl = (url: string) => {
+  if (/^https?:\/\//i.test(url)) return url
+  const prefix = url.startsWith('/') ? '' : '/'
+  return `${API_BASE_URL}${prefix}${url}`
+}
+
+const appendVisualEditParam = (url: string) => {
+  const [beforeHash, hash = ''] = url.split('#')
+  if (beforeHash.includes('visualEdit=1')) return url
+  const sep = beforeHash.includes('?') ? '&' : '?'
+  return `${beforeHash}${sep}visualEdit=1${hash ? `#${hash}` : ''}`
+}
+
+const refreshPreviewAfterTask = async (targetVersionId?: string | number) => {
+  for (let i = 0; i < 6; i++) {
+    await refreshAppInfoOnly()
+    updatePreview()
+    if (!targetVersionId || String(appInfo.value?.currentVersionId || '') === String(targetVersionId)) {
+      return
+    }
+    await sleep(500)
+  }
+}
+
 const updatePreview = () => {
   if (appId.value) {
+    const currentPreviewUrl = appInfo.value?.currentVersion?.previewUrl
+    if (currentPreviewUrl) {
+      previewUrl.value = toAbsolutePreviewUrl(currentPreviewUrl)
+      previewReady.value = true
+      return
+    }
     const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
     const newPreviewUrl = getStaticPreviewUrl(codeGenType, appId.value, appInfo.value)
     previewUrl.value = newPreviewUrl

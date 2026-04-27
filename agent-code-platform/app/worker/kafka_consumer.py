@@ -5,6 +5,7 @@ import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 
 from aiokafka.structs import TopicPartition
 
@@ -13,6 +14,7 @@ from app.config.kafka import get_kafka_consumer
 from app.config.kafka_producer import send_task_result
 from app.config.settings import get_settings
 from app.dependency.container import (
+    get_edit_gen_service,
     get_html_gen_service,
     get_multi_file_gen_service,
     get_stream_service,
@@ -21,6 +23,7 @@ from app.dependency.container import (
 from app.model.event.ai_task_event import AiTaskEvent
 from app.model.event.task_result_event import MessageType, TaskResultEvent, TaskStatus
 from app.model.response.stream_response import ChatCompletionChunk, CompletionMetadata
+from app.service.edit_service import EditGenService
 from app.service.html_service import HtmlGenService
 from app.service.multi_file_service import MultiFileGenService
 from app.service.stream_service import StreamService
@@ -29,6 +32,7 @@ from app.service.task_state_service import (
     TaskRuntimeStatus,
     TaskStateService,
 )
+from app.service.version_manifest import write_element_manifest
 from app.service.vue_project_service import AgentEventType, VueProjectGenService
 from app.tools.path_utils import build_code_output_url, normalize_preview_path
 
@@ -210,6 +214,11 @@ async def _handle_html(
     )
 
     safe_preview = normalize_preview_path(preview_path)
+    write_element_manifest(
+        saved_path.parent,
+        source_path=f"{safe_preview}/html_{app_id}",
+        version_id=None,
+    )
     metadata = CompletionMetadata(
         filename=filename,
         file_path=str(saved_path.resolve()),
@@ -256,6 +265,14 @@ async def _handle_multi_file(
         app_id,
         preview_path,
     )
+    safe_preview = normalize_preview_path(preview_path)
+    project_dir = file_metas[0].file_path if file_metas else None
+    if project_dir:
+        write_element_manifest(
+            Path(project_dir).parent,
+            source_path=f"{safe_preview}/multi_file_{app_id}",
+            version_id=None,
+        )
 
     metadata = CompletionMetadata(files=[f.model_dump() for f in file_metas])
     done_chunk = ChatCompletionChunk.new_done(
@@ -339,6 +356,12 @@ async def _handle_vue_project(
         app_id,
         preview_path,
     )
+    safe_preview = normalize_preview_path(preview_path)
+    write_element_manifest(
+        project_dir,
+        source_path=f"{safe_preview}/vue_project_{app_id}",
+        version_id=None,
+    )
     metadata = CompletionMetadata(files=[f.model_dump() for f in file_metas])
     done_chunk = ChatCompletionChunk.new_done(
         seq=seq,
@@ -353,6 +376,54 @@ async def _handle_vue_project(
         "VUE_PROJECT任务处理完成: task_id=%s, files=%d",
         task_id,
         len(file_metas),
+    )
+
+
+async def _handle_edit(
+    event: AiTaskEvent,
+    completion_id: str,
+    app_id: int,
+    user_id: int,
+    stream_service: LockedStreamService,
+    edit_service: EditGenService,
+) -> None:
+    task_id = event.task.task_id
+    seq = 0
+    for message in ["正在分析选中元素...\n", "正在修改代码并生成新版本...\n"]:
+        chunk = ChatCompletionChunk.new_content(
+            seq=seq,
+            content=message,
+            completion_id=completion_id,
+        )
+        await stream_service.push_chunk(task_id, chunk)
+        seq += 1
+
+    result = await edit_service.apply_edit(event)
+    summary = result.summary or "修改完成"
+    chunk = ChatCompletionChunk.new_content(
+        seq=seq,
+        content=summary,
+        completion_id=completion_id,
+    )
+    await stream_service.push_chunk(task_id, chunk)
+    seq += 1
+
+    done_chunk = ChatCompletionChunk.new_done(
+        seq=seq,
+        metadata={
+            "sourcePath": result.source_path,
+            "manifestPath": result.manifest_path,
+            "previewUrl": result.preview_url,
+            "modifiedFiles": result.modified_files,
+        },
+        completion_id=completion_id,
+    )
+    await stream_service.push_done(task_id, done_chunk)
+    await _send_final_result(task_id, app_id, user_id, summary, seq)
+    logger.info(
+        "EDIT任务处理完成: task_id=%s, files=%d",
+        task_id,
+        len(result.modified_files),
     )
 
 
@@ -419,6 +490,7 @@ async def _run_generation_once(
     html_service: HtmlGenService,
     multi_file_service: MultiFileGenService,
     vue_project_service: VueProjectGenService,
+    edit_service: EditGenService,
 ) -> None:
     task_id = event.task.task_id
     prompt = event.payload.prompt
@@ -445,6 +517,18 @@ async def _run_generation_once(
 
     await task_state_service.set_status(task_id, TaskRuntimeStatus.PROCESSING)
     await _send_processing_status(task_id, app_id, user_id)
+
+    if event.task.task_type.upper() == "EDIT":
+        await _handle_edit(
+            event,
+            completion_id,
+            app_id,
+            user_id,
+            locked_stream_service,
+            edit_service,
+        )
+        await task_state_service.set_status(task_id, TaskRuntimeStatus.SUCCESS)
+        return
 
     pt_lower = project_type.lower()
     if pt_lower == ProjectType.MULTI_FILE.value.lower():
@@ -491,6 +575,7 @@ async def _process_message(
     html_service: HtmlGenService,
     multi_file_service: MultiFileGenService,
     vue_project_service: VueProjectGenService,
+    edit_service: EditGenService,
 ) -> TaskProcessResult:
     topic_partition = TopicPartition(message.topic, message.partition)
     task_id = "unknown"
@@ -536,6 +621,7 @@ async def _process_message(
                         html_service=html_service,
                         multi_file_service=multi_file_service,
                         vue_project_service=vue_project_service,
+                        edit_service=edit_service,
                     ),
                     timeout=settings.generation_timeout_sec,
                     renew_task=renew_task,
@@ -610,6 +696,7 @@ async def kafka_consumer_worker() -> None:
     html_service: HtmlGenService = get_html_gen_service()
     multi_file_service: MultiFileGenService = get_multi_file_gen_service()
     vue_project_service: VueProjectGenService = get_vue_project_gen_service()
+    edit_service: EditGenService = get_edit_gen_service()
     task_state_service = TaskStateService()
     in_flight: dict[TopicPartition, asyncio.Task[TaskProcessResult]] = {}
 
@@ -657,6 +744,7 @@ async def kafka_consumer_worker() -> None:
                         html_service=html_service,
                         multi_file_service=multi_file_service,
                         vue_project_service=vue_project_service,
+                        edit_service=edit_service,
                     )
                 )
     except asyncio.CancelledError:

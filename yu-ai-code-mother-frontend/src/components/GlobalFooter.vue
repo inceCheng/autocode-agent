@@ -3,12 +3,12 @@
     <div class="footer-content">
       <p class="copyright">
         <a
-          href="https://www.codefather.cn"
+          href="https://github.com/inceCheng/autocode-agent"
           target="_blank"
           rel="noopener noreferrer"
           class="author-link"
         >
-          编程导航原创项目 by 程序员鱼皮
+          零代码应用生成平台 by InceCheng
         </a>
       </p>
     </div>

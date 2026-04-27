@@ -5,9 +5,12 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.chg.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
 import com.chg.yuaicodemother.ai.client.AiRouteClient;
+import com.chg.yuaicodemother.ai.client.AiTittleClient;
 import com.chg.yuaicodemother.constant.AppConstant;
+import com.chg.yuaicodemother.constant.UserConstant;
 import com.chg.yuaicodemother.core.AiCodeGeneratorFacade;
 import com.chg.yuaicodemother.core.builder.VueProjectBuilder;
 import com.chg.yuaicodemother.core.handler.StreamHandlerExecutor;
@@ -15,15 +18,15 @@ import com.chg.yuaicodemother.exception.BusinessException;
 import com.chg.yuaicodemother.exception.ErrorCode;
 import com.chg.yuaicodemother.exception.ThrowUtils;
 import com.chg.yuaicodemother.kafka.AiTaskProducer;
-import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
-import com.chg.yuaicodemother.model.dto.app.AppAddResponse;
-import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.chg.yuaicodemother.model.dto.app.*;
 import com.chg.yuaicodemother.model.entity.AiGenerationTask;
+import com.chg.yuaicodemother.model.entity.AppVersion;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.chg.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.chg.yuaicodemother.model.service.ChatHistoryService;
 import com.chg.yuaicodemother.model.vo.AppVO;
+import com.chg.yuaicodemother.model.vo.AppVersionVO;
 import com.chg.yuaicodemother.model.vo.UserVO;
 import com.chg.yuaicodemother.utils.JwtUtils;
 import com.chg.yuaicodemother.utils.TaskIdGenerator;
@@ -70,6 +73,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private AiRouteClient aiRouteClient;
     @Resource
+    private AiTittleClient aiTittleClient;
+    @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
     @Resource
     private VueProjectBuilder vueProjectBuilder;
@@ -83,6 +88,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private JwtUtils jwtUtils;
     @Resource
     private AiTaskProducer aiTaskProducer;
+    @Resource
+    private AppVersionServiceImpl appVersionService;
 
     @Override
     public AppAddResponse createApp(AppAddRequest appAddRequest, User loginUser) {
@@ -93,17 +100,20 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
-        // 应用名称暂时为 initPrompt 前 12 位
-        // TODO 使用 AI 智能总结标题
-        app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
+        try {
+            app.setAppName(aiTittleClient.getAiTitle(initPrompt));
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "标题创建失败");
+        }
         // 使用 AI 智能选择代码生成类型 调用 Python 服务
         CodeGenTypeEnum projectType = null;
         try {
             projectType = aiRouteClient.getProjectType(initPrompt);
+            app.setCodeGenType(projectType.getValue());
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "路由失败");
         }
-        app.setCodeGenType(projectType.getValue());
+
         // 设置预览路径
         LocalDate now = LocalDate.now();
         String datePath = String.format("%d/%02d/%02d",
@@ -119,14 +129,33 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 返回 jwt，并生成 task id ，传入 Kafka 消息队列
         HashMap<String, Object> claims = new HashMap<>();
         claims.put("prompt", initPrompt);
+        claims.put("appId", String.valueOf(appId));
         String token = jwtUtils.generateToken(String.valueOf(loginUser.getId()), claims);
         // 生成 task id
         long taskId = new TaskIdGenerator(1).nextId();
         String traceId = TraceIdGenerator.generateTraceId();
+        int versionNo = appVersionService.getNextVersionNo(appId);
+        String sourcePath = appVersionService.buildSourcePath(datePath, projectType.getValue(), appId, versionNo);
+        AppVersion appVersion = AppVersion.builder()
+                .appId(appId)
+                .versionNo(versionNo)
+                .taskId(String.valueOf(taskId))
+                .codeGenType(projectType.getValue())
+                .sourcePath(sourcePath)
+                .manifestPath(appVersionService.buildManifestPath(sourcePath))
+                .previewUrl(appVersionService.buildPreviewUrl(sourcePath, projectType.getValue()))
+                .status(PENDING)
+                .createTime(LocalDateTime.now())
+                .updateTime(LocalDateTime.now())
+                .build();
+        boolean versionSaved = appVersionService.save(appVersion);
+        ThrowUtils.throwIf(!versionSaved, ErrorCode.SYSTEM_ERROR, "应用版本创建失败，请稍后重试～");
         AiGenerationTask aiGenerationTask = AiGenerationTask.builder()
                 .appId(appId)
                 .taskId(String.valueOf(taskId))
                 .projectType(projectType.getValue())
+                .taskType(TASK_TYPE_GENERATE)
+                .targetVersionId(appVersion.getId())
                 .status(PENDING)
                 .userId(loginUser.getId())
                 .retryCount(RETRY_COUNT)
@@ -137,17 +166,136 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 .build();
         // 状态落库
         boolean save = aiGenerationTaskService.save(aiGenerationTask);
-        ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR,"应用状态更新失败，请稍候重试～");
+        ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR, "应用状态更新失败，请稍候重试～");
+        App statusApp = new App();
+        statusApp.setId(appId);
+        statusApp.setCurrentTaskId(String.valueOf(taskId));
+        statusApp.setGenerateStatus(PENDING);
+        this.updateById(statusApp);
         //  发送 Kafka 消息
         aiTaskProducer.sendGenerationTask(String.valueOf(taskId),
                 String.valueOf(loginUser.getId()),
                 String.valueOf(appId), initPrompt,
-                projectType.getValue(), traceId, datePath);
+                projectType.getValue(), traceId, datePath, appVersion.getId(), sourcePath);
         // 同步 redis 中 task 的状态
         stringRedisTemplate.opsForValue().set(STATUS_KEY_PREFIX + taskId, PENDING, TASK_TIMEOUT, TimeUnit.HOURS);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         log.info("应用创建成功，ID: {}, 类型: {}", appId, projectType.getValue());
-        return new AppAddResponse(String.valueOf(taskId), appId, token);
+        return new AppAddResponse(String.valueOf(taskId), appId, token, appVersion.getId());
+    }
+
+    @Override
+    public AppEditCreateResponse createEditTask(AppEditCreateRequest request, User loginUser) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "请求不能为空");
+        Long appId = request.getAppId();
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+        ThrowUtils.throwIf(StrUtil.isBlank(request.getInstruction()), ErrorCode.PARAMS_ERROR, "修改要求不能为空");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!app.getUserId().equals(loginUser.getId()), ErrorCode.NO_AUTH_ERROR, "无权限修改该应用");
+        ThrowUtils.throwIf(StrUtil.isNotBlank(app.getCurrentTaskId())
+                        && !SUCCESS.equals(app.getGenerateStatus())
+                        && !FAILED.equals(app.getGenerateStatus())
+                        && !CANCELLED.equals(app.getGenerateStatus())
+                        && !INTERRUPTED.equals(app.getGenerateStatus()),
+                ErrorCode.OPERATION_ERROR, "当前应用有任务正在执行，请稍后再试");
+
+        Long baseVersionId = request.getBaseVersionId();
+        AppVersion baseVersion;
+        if (baseVersionId != null && baseVersionId > 0) {
+            baseVersion = appVersionService.getById(baseVersionId);
+        } else if (app.getCurrentVersionId() != null) {
+            baseVersion = appVersionService.getById(app.getCurrentVersionId());
+        } else {
+            baseVersion = appVersionService.getCurrentSuccessVersion(appId);
+        }
+        ThrowUtils.throwIf(baseVersion == null, ErrorCode.NOT_FOUND_ERROR, "当前应用还没有可编辑的成功版本");
+        ThrowUtils.throwIf(!appId.equals(baseVersion.getAppId()), ErrorCode.NO_AUTH_ERROR, "版本不属于当前应用");
+        ThrowUtils.throwIf(!SUCCESS.equals(baseVersion.getStatus()), ErrorCode.OPERATION_ERROR, "只能基于成功版本进行修改");
+
+        int nextVersionNo = appVersionService.getNextVersionNo(appId);
+        long taskId = new TaskIdGenerator(1).nextId();
+        String traceId = TraceIdGenerator.generateTraceId();
+        String codeGenType = app.getCodeGenType();
+        String targetSourcePath = appVersionService.buildSourcePath(app.getPreviewPath(), codeGenType, appId, nextVersionNo);
+        AppVersion targetVersion = AppVersion.builder()
+                .appId(appId)
+                .parentVersionId(baseVersion.getId())
+                .versionNo(nextVersionNo)
+                .taskId(String.valueOf(taskId))
+                .codeGenType(codeGenType)
+                .sourcePath(targetSourcePath)
+                .manifestPath(appVersionService.buildManifestPath(targetSourcePath))
+                .previewUrl(appVersionService.buildPreviewUrl(targetSourcePath, codeGenType))
+                .status(PENDING)
+                .createTime(LocalDateTime.now())
+                .updateTime(LocalDateTime.now())
+                .build();
+        boolean versionSaved = appVersionService.save(targetVersion);
+        ThrowUtils.throwIf(!versionSaved, ErrorCode.SYSTEM_ERROR, "应用版本创建失败，请稍后重试～");
+
+        String requestPayload = JSONUtil.toJsonStr(request);
+        AiGenerationTask aiGenerationTask = AiGenerationTask.builder()
+                .appId(appId)
+                .taskId(String.valueOf(taskId))
+                .projectType(codeGenType)
+                .taskType(TASK_TYPE_EDIT)
+                .baseVersionId(baseVersion.getId())
+                .targetVersionId(targetVersion.getId())
+                .status(PENDING)
+                .userId(loginUser.getId())
+                .retryCount(RETRY_COUNT)
+                .maxRetryCount(MAX_RETRY_COUNT)
+                .requestPayload(requestPayload)
+                .version(DEFAULT_VERSION)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        boolean taskSaved = aiGenerationTaskService.save(aiGenerationTask);
+        ThrowUtils.throwIf(!taskSaved, ErrorCode.SYSTEM_ERROR, "修改任务创建失败，请稍后重试～");
+
+        chatHistoryService.addChatMessage(appId, request.getInstruction(), ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+
+        App statusApp = new App();
+        statusApp.setId(appId);
+        statusApp.setCurrentTaskId(String.valueOf(taskId));
+        statusApp.setGenerateStatus(PENDING);
+        this.updateById(statusApp);
+
+        HashMap<String, Object> claims = new HashMap<>();
+        claims.put("appId", String.valueOf(appId));
+        claims.put("taskId", String.valueOf(taskId));
+        claims.put("taskType", TASK_TYPE_EDIT);
+        String token = jwtUtils.generateToken(String.valueOf(loginUser.getId()), claims);
+
+        List<Object> selectedElements = request.getSelectedElements() == null
+                ? Collections.emptyList()
+                : request.getSelectedElements().stream().map(item -> (Object) item).toList();
+        aiTaskProducer.sendEditTask(
+                String.valueOf(taskId),
+                String.valueOf(loginUser.getId()),
+                String.valueOf(appId),
+                request.getInstruction(),
+                codeGenType,
+                traceId,
+                app.getPreviewPath(),
+                baseVersion.getId(),
+                targetVersion.getId(),
+                baseVersion.getSourcePath(),
+                targetSourcePath,
+                selectedElements,
+                StrUtil.blankToDefault(request.getScope(), "single")
+        );
+        stringRedisTemplate.opsForValue().set(STATUS_KEY_PREFIX + taskId, PENDING, TASK_TIMEOUT, TimeUnit.HOURS);
+        return new AppEditCreateResponse(
+                String.valueOf(taskId),
+                appId,
+                token,
+                baseVersion.getId(),
+                targetVersion.getId(),
+                PENDING
+        );
     }
 
 
@@ -181,6 +329,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public String deployApp(Long appId, User loginUser) {
+        return deployAppVersion(appId, null, loginUser);
+    }
+
+    @Override
+    public String deployAppVersion(Long appId, Long versionId, User loginUser) {
         // 1. 参数校验
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR, "用户未登录");
@@ -191,6 +344,19 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限部署该应用");
         }
+        AppVersion version = null;
+        if (versionId != null && versionId > 0) {
+            version = appVersionService.getById(versionId);
+            ThrowUtils.throwIf(version == null, ErrorCode.NOT_FOUND_ERROR, "应用版本不存在");
+            ThrowUtils.throwIf(!appId.equals(version.getAppId()), ErrorCode.NO_AUTH_ERROR, "版本不属于当前应用");
+        } else if (app.getCurrentVersionId() != null) {
+            version = appVersionService.getById(app.getCurrentVersionId());
+        } else {
+            version = appVersionService.getCurrentSuccessVersion(appId);
+        }
+        if (version != null) {
+            ThrowUtils.throwIf(!SUCCESS.equals(version.getStatus()), ErrorCode.OPERATION_ERROR, "只能部署成功版本");
+        }
         // 4. 检查是否已有 deployKey
         String deployKey = app.getDeployKey();
         // 没有则生成 6 位 deployKey（大小写字母 + 数字）
@@ -198,8 +364,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             deployKey = RandomUtil.randomString(6);
         }
         // 5. 获取代码生成类型，构建源目录路径
-        String codeGenType = app.getCodeGenType();
-        String sourceDirPath = String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, app.getPreviewPath(), codeGenType, appId);
+        String codeGenType = version != null ? version.getCodeGenType() : app.getCodeGenType();
+        String sourceDirPath = version != null
+                ? String.format("%s/%s", AppConstant.CODE_OUTPUT_ROOT_DIR, version.getSourcePath())
+                : String.format("%s/%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, app.getPreviewPath(), codeGenType, appId);
         // 6. 检查源目录是否存在
         File sourceDir = new File(sourceDirPath);
         if (!sourceDir.exists() || !sourceDir.isDirectory()) {
@@ -247,6 +415,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         AppVO appVO = new AppVO();
         BeanUtil.copyProperties(app, appVO);
+        if (app.getCurrentVersionId() != null) {
+            AppVersion currentVersion = appVersionService.getById(app.getCurrentVersionId());
+            appVO.setCurrentVersion(appVersionService.getVersionVO(currentVersion));
+        }
         // 关联查询用户信息
         Long userId = app.getUserId();
         if (userId != null) {
@@ -295,12 +467,49 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 .collect(Collectors.toSet());
         Map<Long, UserVO> userVOMap = userService.listByIds(userIds).stream()
                 .collect(Collectors.toMap(User::getId, userService::getUserVO));
+        Set<Long> versionIds = appList.stream()
+                .map(App::getCurrentVersionId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, AppVersionVO> versionVOMap = versionIds.isEmpty()
+                ? Collections.emptyMap()
+                : appVersionService.listByIds(versionIds).stream()
+                .collect(Collectors.toMap(AppVersion::getId, appVersionService::getVersionVO));
         return appList.stream().map(app -> {
             AppVO appVO = getAppVO(app);
             UserVO userVO = userVOMap.get(app.getUserId());
             appVO.setUser(userVO);
+            if (app.getCurrentVersionId() != null) {
+                appVO.setCurrentVersion(versionVOMap.get(app.getCurrentVersionId()));
+            }
             return appVO;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public AppVersionVO getCurrentVersionVO(Long appId, User loginUser) {
+        App app = validateAppAccess(appId, loginUser);
+        AppVersion version = app.getCurrentVersionId() == null
+                ? appVersionService.getCurrentSuccessVersion(appId)
+                : appVersionService.getById(app.getCurrentVersionId());
+        return appVersionService.getVersionVO(version);
+    }
+
+    @Override
+    public List<AppVersionVO> listVersionVO(Long appId, User loginUser) {
+        validateAppAccess(appId, loginUser);
+        return appVersionService.listVersionVO(appId);
+    }
+
+    private App validateAppAccess(Long appId, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR, "用户未登录");
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        boolean isAdmin = UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole());
+        boolean isOwner = app.getUserId().equals(loginUser.getId());
+        ThrowUtils.throwIf(!isAdmin && !isOwner, ErrorCode.NO_AUTH_ERROR, "无权访问该应用");
+        return app;
     }
 
     /**

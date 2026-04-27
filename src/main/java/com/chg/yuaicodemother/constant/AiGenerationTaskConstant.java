@@ -14,6 +14,8 @@ public interface AiGenerationTaskConstant {
     String INTERRUPTED = "INTERRUPTED";
     String FAILED = "FAILED";
     String CANCELLED = "CANCELLED";
+    String TASK_TYPE_GENERATE = "GENERATE";
+    String TASK_TYPE_EDIT = "EDIT";
     int RETRY_COUNT = 0;
     int MAX_RETRY_COUNT = 3;
     int DEFAULT_VERSION = 0;

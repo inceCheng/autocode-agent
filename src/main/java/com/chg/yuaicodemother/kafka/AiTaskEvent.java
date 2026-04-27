@@ -21,6 +21,11 @@ public class AiTaskEvent {
         private String appId;
         private String previewPath;
         private String projectType; // 智能路由结果: HTML/VUE_PROJECT 等
+        private String taskType; // GENERATE / EDIT
+        private String baseVersionId;
+        private String targetVersionId;
+        private String baseSourcePath;
+        private String targetSourcePath;
     }
 
     @Data
@@ -28,5 +33,7 @@ public class AiTaskEvent {
     public static class Payload {
         private String prompt;
         private List<Object> contextMessages;
+        private List<Object> selectedElements;
+        private String scope;
     }
 }

@@ -2,9 +2,12 @@ package com.chg.yuaicodemother.model.service;
 
 import com.chg.yuaicodemother.model.dto.app.AppAddRequest;
 import com.chg.yuaicodemother.model.dto.app.AppAddResponse;
+import com.chg.yuaicodemother.model.dto.app.AppEditCreateRequest;
+import com.chg.yuaicodemother.model.dto.app.AppEditCreateResponse;
 import com.chg.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.chg.yuaicodemother.model.entity.User;
 import com.chg.yuaicodemother.model.vo.AppVO;
+import com.chg.yuaicodemother.model.vo.AppVersionVO;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
 import com.chg.yuaicodemother.model.entity.App;
@@ -28,6 +31,11 @@ public interface AppService extends IService<App> {
     AppAddResponse createApp(AppAddRequest appAddRequest, User loginUser);
 
     /**
+     * 创建定点修改任务。
+     */
+    AppEditCreateResponse createEditTask(AppEditCreateRequest request, User loginUser);
+
+    /**
      * 应用聊天生成代码 流式 SSE
      *
      * @param appId     应用 id
@@ -46,6 +54,11 @@ public interface AppService extends IService<App> {
      * @return 应用 URL
      */
     String deployApp(Long appId, User loginUser);
+
+    /**
+     * 部署指定版本。
+     */
+    String deployAppVersion(Long appId, Long versionId, User loginUser);
 
     /**
      * 应用详情
@@ -71,6 +84,16 @@ public interface AppService extends IService<App> {
      * @return 脱敏后用户列表
      */
     List<AppVO> getAppVOList(List<App> appList);
+
+    /**
+     * 获取当前成功版本。
+     */
+    AppVersionVO getCurrentVersionVO(Long appId, User loginUser);
+
+    /**
+     * 获取应用版本列表。
+     */
+    List<AppVersionVO> listVersionVO(Long appId, User loginUser);
 
     void generateAppScreenshotAsync(Long appId, String appUrl);
 }

@@ -183,7 +183,7 @@ public class TaskResultConsumer {
         }
 
         try {
-            aiGenerationTaskService.updateTaskStatus(taskId, appId, userId, newStatus, event.getErrorMsg());
+            aiGenerationTaskService.updateTaskStatus(event);
             log.debug("任务状态已更新, taskId={}, status={}", taskId, newStatus);
         } catch (Exception e) {
             log.error("更新任务状态失败, taskId={}, status={}", taskId, newStatus, e);
